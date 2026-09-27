@@ -133,3 +133,21 @@ class ConversationScenarioTests(APITestCase):
         self.assertEqual(state_after_shipping["constraints"]["budget_max"], 1500000)
         self.assertEqual(state_after_shipping["routing_decision"], "RESUME")
         self.assertIsNone(state_after_shipping["interruption"])
+
+    def test_replace_abandons_previous_goal_and_starts_a_new_one(self):
+        Category.objects.create(name="Monitores", slug="monitores")
+        conversation = Conversation.objects.create()
+
+        self._post_message(conversation, "Busco una notebook gamer.")
+        budget_response = self._post_message(conversation, "Tengo hasta $1.500.000.")
+        self.assertIn(self.gaming_laptop.id, budget_response.data["sales_state"]["candidate_products"])
+
+        replace_response = self._post_message(
+            conversation, "Olvidate de la notebook. Quiero buscar un monitor."
+        )
+
+        state_after_replace = replace_response.data["sales_state"]
+        self.assertEqual(state_after_replace["routing_decision"], "REPLACE")
+        self.assertEqual(state_after_replace["candidate_products"], [])
+        self.assertEqual(state_after_replace["constraints"], {})
+        self.assertEqual(state_after_replace["active_workflow"], "PRODUCT_PURCHASE")

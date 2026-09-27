@@ -6,7 +6,7 @@ from typesafe_sdk import ChoiceAnswer, TypeSafeError
 from workflows.graph.state import build_initial_state
 
 from .decision_model import AlwaysContinueDecisionModel
-from .heuristics import match_known_side_query_keywords
+from .heuristics import match_known_intent_keywords
 from .jev_router import JevDecisionModel, get_jev_decision_model
 from .router import route_message
 
@@ -31,6 +31,14 @@ class RouteMessageTests(SimpleTestCase):
         # No Jev configured -> medium-confidence CONTINUE, no shipping
         # keyword to override it via the heuristic.
         self.assertEqual(state["routing_decision"], "CONTINUE")
+        self.assertEqual(state["routing_confidence"], 0.7)
+
+    def test_replace_keyword_overrides_fallback_to_replace(self):
+        state = build_initial_state(conversation_id=1)
+
+        state = route_message(state, "Olvidate de la notebook. Quiero buscar un monitor.")
+
+        self.assertEqual(state["routing_decision"], "REPLACE")
         self.assertEqual(state["routing_confidence"], 0.7)
 
     def test_shipping_keyword_overrides_fallback_to_side_query(self):
@@ -105,15 +113,23 @@ class GetJevDecisionModelTests(SimpleTestCase):
         self.assertIsInstance(model, JevDecisionModel)
 
 
-class MatchKnownSideQueryKeywordsTests(SimpleTestCase):
+class MatchKnownIntentKeywordsTests(SimpleTestCase):
     def test_matches_shipping_keyword(self):
-        self.assertEqual(match_known_side_query_keywords("¿Hacen envíos a Santa Fe?"), "SIDE_QUERY")
+        self.assertEqual(match_known_intent_keywords("¿Hacen envíos a Santa Fe?"), "SIDE_QUERY")
 
     def test_matches_warranty_keyword(self):
-        self.assertEqual(match_known_side_query_keywords("¿Tiene garantía?"), "SIDE_QUERY")
+        self.assertEqual(match_known_intent_keywords("¿Tiene garantía?"), "SIDE_QUERY")
+
+    def test_matches_replace_keyword(self):
+        result = match_known_intent_keywords("Olvidate de la notebook. Quiero buscar un monitor.")
+        self.assertEqual(result, "REPLACE")
+
+    def test_replace_takes_priority_over_side_query(self):
+        result = match_known_intent_keywords("Olvidate del envío, mejor busco un monitor.")
+        self.assertEqual(result, "REPLACE")
 
     def test_returns_none_when_no_keyword_matches(self):
-        self.assertIsNone(match_known_side_query_keywords("Quiero la notebook ASUS."))
+        self.assertIsNone(match_known_intent_keywords("Quiero la notebook ASUS."))
 
 
 class _FixedDecisionModel:

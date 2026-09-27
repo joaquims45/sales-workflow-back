@@ -6,8 +6,9 @@ Confidence strategy (ARCHITECTURE.md §12):
   for an LLM call; use it if it resolves the ambiguity, else escalate.
 - low confidence: escalate straight to an LLM.
 
-Acting on SIDE_QUERY (suspend/resume) and REPLACE (close/replace goal)
-lands in M7/M8 — for now this only records the final decision.
+This module only decides; acting on the decision (suspending for
+SIDE_QUERY, resetting for REPLACE) happens in
+workflows/graph/orchestrator.py.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from providers.llm import get_routing_llm_provider
 from workflows.graph.state import SalesState
 
 from .decision_model import DecisionModel, RoutingResult, get_decision_model
-from .heuristics import match_known_side_query_keywords
+from .heuristics import match_known_intent_keywords
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ def _resolve_with_confidence(message_text: str, state: SalesState, result: Routi
         return result
 
     if result["confidence"] >= settings.JEV_CONFIDENCE_LOW:
-        keyword_decision = match_known_side_query_keywords(message_text)
+        keyword_decision = match_known_intent_keywords(message_text)
         if keyword_decision is not None:
-            logger.info("Resolved medium-confidence routing via keyword heuristic.")
+            logger.info("Resolved medium-confidence routing via keyword heuristic: %s", keyword_decision)
             return {"decision": keyword_decision, "confidence": result["confidence"]}
 
     logger.info("Escalating routing decision to LLM (confidence=%.2f).", result["confidence"])

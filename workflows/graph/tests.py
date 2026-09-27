@@ -6,7 +6,7 @@ from django.test import SimpleTestCase, TestCase
 from apps.catalog.models import Category, Product
 
 from .extraction import extract_budget, extract_needs
-from .orchestrator import run_side_query
+from .orchestrator import run_replace, run_side_query
 from .product_purchase import run_product_purchase
 from .shipping_query import run_shipping_query
 from .state import FunnelStage, build_initial_state
@@ -142,3 +142,37 @@ class RunSideQueryTests(SimpleTestCase):
         self.assertIsNone(new_state["active_workflow"])
         self.assertIsNone(new_state["active_node"])
         self.assertEqual(new_state["workflow_stack"], [])
+
+
+class RunReplaceTests(TestCase):
+    def setUp(self):
+        # Same reasoning as ProductPurchaseGraphTests: isolate from whatever
+        # FAISS index exists on the developer's machine.
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        override = self.settings(FAISS_INDEX_PATH=str(Path(tmp_dir.name) / "unused.bin"))
+        override.enable()
+        self.addCleanup(override.disable)
+
+        Category.objects.create(name="Monitores", slug="monitores")
+
+    def test_replace_clears_previous_goal_and_starts_fresh(self):
+        state = build_initial_state(conversation_id=1)
+        state["primary_goal"] = "BUY_PRODUCT"
+        state["active_workflow"] = "PRODUCT_PURCHASE"
+        state["active_node"] = "PRODUCT_COMPARISON"
+        state["customer_needs"] = ["gaming", "programming"]
+        state["constraints"] = {"budget_max": 1500000}
+        state["candidate_products"] = [1, 2, 3]
+        state["routing_confidence"] = 0.7
+
+        new_state, reply = run_replace(state, "Olvidate de la notebook. Quiero buscar un monitor.")
+
+        self.assertEqual(new_state["routing_decision"], "REPLACE")
+        self.assertEqual(new_state["routing_confidence"], 0.7)
+        self.assertEqual(new_state["candidate_products"], [])
+        self.assertEqual(new_state["constraints"], {})
+        # The new message re-enters DISCOVERY like any fresh conversation.
+        self.assertEqual(new_state["primary_goal"], "BUY_PRODUCT")
+        self.assertEqual(new_state["active_workflow"], "PRODUCT_PURCHASE")
+        self.assertTrue(reply)
