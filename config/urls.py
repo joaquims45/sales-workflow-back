@@ -23,4 +23,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('healthz/', healthcheck, name='healthcheck'),
     path('api/catalog/', include('apps.catalog.urls')),
+    path('api/conversations/', include('apps.conversations.urls')),
 ]
