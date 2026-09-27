@@ -185,3 +185,10 @@ else:
             'BACKEND': 'channels.layers.InMemoryChannelLayer',
         },
     }
+
+
+# Payments (ARCHITECTURE.md §39/§43/§44)
+# "mock" requires no external credentials and is the default in every
+# environment unless explicitly overridden.
+
+PAYMENT_PROVIDER = env('PAYMENT_PROVIDER', default='mock')
