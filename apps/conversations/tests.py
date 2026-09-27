@@ -23,9 +23,34 @@ class ConversationAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(conversation.messages.count(), 2)
 
-        roles = [item["role"] for item in response.data]
+        roles = [item["role"] for item in response.data["messages"]]
         self.assertEqual(roles, [Message.Role.USER, Message.Role.ASSISTANT])
-        self.assertIn("Busco una notebook gamer.", response.data[1]["content"])
+        self.assertIn("Busco una notebook gamer.", response.data["messages"][1]["content"])
+
+    def test_post_message_updates_sales_state(self):
+        conversation = Conversation.objects.create()
+        url = reverse("conversation-messages", args=[conversation.pk])
+
+        response = self.client.post(
+            url, {"content": "Busco una notebook para programar y jugar."}, format="json"
+        )
+
+        state = response.data["sales_state"]
+        self.assertEqual(state["primary_goal"], "BUY_PRODUCT")
+        self.assertIn("gaming", state["customer_needs"])
+        self.assertIn("programming", state["customer_needs"])
+        self.assertEqual(state["funnel_stage"], "CONSIDERATION")
+
+    def test_state_endpoint_returns_current_snapshot(self):
+        conversation = Conversation.objects.create()
+        messages_url = reverse("conversation-messages", args=[conversation.pk])
+        self.client.post(messages_url, {"content": "Tengo hasta $1.500.000."}, format="json")
+
+        state_url = reverse("conversation-state", args=[conversation.pk])
+        response = self.client.get(state_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["constraints"]["budget_max"], 1500000)
 
     def test_post_message_requires_content(self):
         conversation = Conversation.objects.create()

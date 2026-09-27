@@ -33,3 +33,18 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.role}: {self.content[:40]}"
+
+
+class SalesStateSnapshot(models.Model):
+    """Latest structured SalesState for a conversation.
+
+    See workflows/graph/state.py for the shape of `state`. This is a
+    snapshot (not an event log) — it always holds the most recent state.
+    """
+
+    conversation = models.OneToOneField(Conversation, on_delete=models.CASCADE, related_name="state_snapshot")
+    state = models.JSONField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"SalesState for Conversation #{self.conversation_id}"

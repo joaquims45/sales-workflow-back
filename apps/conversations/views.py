@@ -4,6 +4,7 @@ from rest_framework.response import Response
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer, PostMessageSerializer
+from .services import get_or_create_state, update_state_from_message
 
 
 class ConversationViewSet(
@@ -26,6 +27,11 @@ class ConversationViewSet(
         user_message = Message.objects.create(
             conversation=conversation, role=Message.Role.USER, content=content
         )
+
+        # Hardcoded transition until the real router (Jev) + PRODUCT_PURCHASE
+        # graph exist (M4+) — see workflows/graph/transitions.py.
+        state = update_state_from_message(conversation, content)
+
         # Placeholder response until the sales workflow/routing is wired in (M6+).
         assistant_message = Message.objects.create(
             conversation=conversation,
@@ -34,6 +40,14 @@ class ConversationViewSet(
         )
 
         return Response(
-            MessageSerializer([user_message, assistant_message], many=True).data,
+            {
+                "messages": MessageSerializer([user_message, assistant_message], many=True).data,
+                "sales_state": state,
+            },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["get"], url_path="state")
+    def state(self, request, pk=None):
+        conversation = self.get_object()
+        return Response(get_or_create_state(conversation))
