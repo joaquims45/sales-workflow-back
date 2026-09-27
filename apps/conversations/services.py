@@ -1,5 +1,5 @@
+from workflows.graph.product_purchase import run_product_purchase
 from workflows.graph.state import SalesState, build_initial_state
-from workflows.graph.transitions import apply_hardcoded_transition
 
 from .models import Conversation, SalesStateSnapshot
 
@@ -12,9 +12,11 @@ def get_or_create_state(conversation: Conversation) -> SalesState:
     return snapshot.state
 
 
-def update_state_from_message(conversation: Conversation, message_text: str) -> SalesState:
-    state = get_or_create_state(conversation)
-    state = apply_hardcoded_transition(state, message_text)
+def advance_conversation(conversation: Conversation, message_text: str) -> tuple[SalesState, str]:
+    """Run one turn of the sales workflow and persist the resulting state."""
 
-    SalesStateSnapshot.objects.filter(conversation=conversation).update(state=state)
-    return state
+    state = get_or_create_state(conversation)
+    new_state, reply = run_product_purchase(state, message_text)
+
+    SalesStateSnapshot.objects.filter(conversation=conversation).update(state=new_state)
+    return new_state, reply

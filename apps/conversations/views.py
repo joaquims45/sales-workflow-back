@@ -4,7 +4,7 @@ from rest_framework.response import Response
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer, PostMessageSerializer
-from .services import get_or_create_state, update_state_from_message
+from .services import advance_conversation, get_or_create_state
 
 
 class ConversationViewSet(
@@ -28,15 +28,15 @@ class ConversationViewSet(
             conversation=conversation, role=Message.Role.USER, content=content
         )
 
-        # Hardcoded transition until the real router (Jev) + PRODUCT_PURCHASE
-        # graph exist (M4+) — see workflows/graph/transitions.py.
-        state = update_state_from_message(conversation, content)
+        # Runs the PRODUCT_PURCHASE graph (DISCOVERY -> PRODUCT_SEARCH ->
+        # RECOMMENDATION). No routing/Jev yet — every message re-enters at
+        # DISCOVERY (see workflows/graph/product_purchase.py).
+        state, reply = advance_conversation(conversation, content)
 
-        # Placeholder response until the sales workflow/routing is wired in (M6+).
         assistant_message = Message.objects.create(
             conversation=conversation,
             role=Message.Role.ASSISTANT,
-            content=f"Recibido: {content}",
+            content=reply,
         )
 
         return Response(

@@ -14,7 +14,7 @@ class ConversationAPITests(APITestCase):
         self.assertEqual(Conversation.objects.count(), 1)
         self.assertEqual(response.data["messages"], [])
 
-    def test_post_message_echoes_back(self):
+    def test_post_message_runs_workflow_and_replies(self):
         conversation = Conversation.objects.create()
         url = reverse("conversation-messages", args=[conversation.pk])
 
@@ -25,7 +25,8 @@ class ConversationAPITests(APITestCase):
 
         roles = [item["role"] for item in response.data["messages"]]
         self.assertEqual(roles, [Message.Role.USER, Message.Role.ASSISTANT])
-        self.assertIn("Busco una notebook gamer.", response.data["messages"][1]["content"])
+        # No budget yet -> DISCOVERY asks for it instead of searching.
+        self.assertIn("presupuesto", response.data["messages"][1]["content"].lower())
 
     def test_post_message_updates_sales_state(self):
         conversation = Conversation.objects.create()
