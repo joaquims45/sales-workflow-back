@@ -39,6 +39,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -46,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'channels',
     'apps.accounts',
     'apps.catalog',
     'apps.customers',
@@ -83,6 +85,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 
 
 # Database
@@ -159,3 +162,26 @@ TYPESAFE_API_KEY = env('TYPESAFE_API_KEY', default='')
 # < LOW: escalate to an LLM (falls back to Jev's own call if none is configured).
 JEV_CONFIDENCE_HIGH = env.float('JEV_CONFIDENCE_HIGH', default=0.85)
 JEV_CONFIDENCE_LOW = env.float('JEV_CONFIDENCE_LOW', default=0.6)
+
+
+# Real-time events (ARCHITECTURE.md §20)
+# In-memory by default, so WebSocket events work with zero setup (single
+# process only — fine for local dev/tests). Set REDIS_URL to use Redis, the
+# same layer docker-compose will wire up, and the one that works across
+# multiple backend processes.
+
+REDIS_URL = env('REDIS_URL', default='')
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {'hosts': [REDIS_URL]},
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }

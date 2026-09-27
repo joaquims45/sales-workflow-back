@@ -28,15 +28,19 @@ logger = logging.getLogger(__name__)
 
 def route_message(
     state: SalesState, message_text: str, decision_model: DecisionModel | None = None
-) -> SalesState:
+) -> tuple[SalesState, RoutingResult]:
+    """Returns (state, raw_decision) — raw_decision is Jev's call before
+    thresholds/heuristics/escalation, so callers can emit `jev.decision`
+    separately from the final `routing.completed` (ARCHITECTURE.md §20)."""
+
     model = decision_model or get_decision_model()
-    result = model.decide(message_text, state)
-    result = _resolve_with_confidence(message_text, state, result)
+    raw_result = model.decide(message_text, state)
+    final_result = _resolve_with_confidence(message_text, state, raw_result)
 
-    state["routing_decision"] = result["decision"]
-    state["routing_confidence"] = result["confidence"]
+    state["routing_decision"] = final_result["decision"]
+    state["routing_confidence"] = final_result["confidence"]
 
-    return state
+    return state, raw_result
 
 
 def _resolve_with_confidence(message_text: str, state: SalesState, result: RoutingResult) -> RoutingResult:

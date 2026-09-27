@@ -5,6 +5,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.analytics.models import WorkflowEvent
 from apps.catalog.models import Category, Product
 
 from .models import Conversation, Message
@@ -134,6 +135,15 @@ class ConversationScenarioTests(APITestCase):
         self.assertEqual(state_after_shipping["routing_decision"], "RESUME")
         self.assertIsNone(state_after_shipping["interruption"])
 
+        event_types = list(
+            conversation.events.order_by("created_at").values_list("event_type", flat=True)
+        )
+        self.assertIn("workflow.started", event_types)
+        self.assertIn("workflow.suspended", event_types)
+        self.assertIn("workflow.resumed", event_types)
+        self.assertEqual(event_types.count("jev.decision"), 3)
+        self.assertEqual(event_types.count("routing.completed"), 3)
+
     def test_replace_abandons_previous_goal_and_starts_a_new_one(self):
         Category.objects.create(name="Monitores", slug="monitores")
         conversation = Conversation.objects.create()
@@ -151,3 +161,7 @@ class ConversationScenarioTests(APITestCase):
         self.assertEqual(state_after_replace["candidate_products"], [])
         self.assertEqual(state_after_replace["constraints"], {})
         self.assertEqual(state_after_replace["active_workflow"], "PRODUCT_PURCHASE")
+
+        self.assertTrue(
+            WorkflowEvent.objects.filter(conversation=conversation, event_type="workflow.replaced").exists()
+        )
