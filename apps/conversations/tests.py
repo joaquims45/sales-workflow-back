@@ -7,6 +7,8 @@ from rest_framework.test import APITestCase
 
 from apps.analytics.models import WorkflowEvent
 from apps.catalog.models import Category, Product
+from apps.orders.models import Order
+from apps.payments.models import Payment
 
 from .models import Conversation, Message
 
@@ -164,6 +166,27 @@ class ConversationScenarioTests(APITestCase):
         self.assertIn("workflow.resumed", event_types)
         self.assertEqual(event_types.count("jev.decision"), 3)
         self.assertEqual(event_types.count("routing.completed"), 3)
+
+        # "Perfecto, quiero comprarla." (PLAN.MD §25): the workflow resumed
+        # after shipping should still be able to close the sale.
+        purchase_response = self._post_message(conversation, "Perfecto, quiero comprarla.")
+
+        purchase_reply = purchase_response.data["messages"][1]["content"]
+        self.assertIn("Listo", purchase_reply)
+
+        state_after_purchase = purchase_response.data["sales_state"]
+        self.assertTrue(state_after_purchase["checkout_ready"])
+        self.assertEqual(state_after_purchase["selected_product_id"], self.gaming_laptop.id)
+
+        order = Order.objects.get()
+        self.assertEqual(order.conversation_id, conversation.id)
+        self.assertEqual(Payment.objects.get().status, Payment.Status.PENDING)
+
+        final_event_types = list(
+            conversation.events.order_by("created_at").values_list("event_type", flat=True)
+        )
+        self.assertIn("order.created", final_event_types)
+        self.assertIn("checkout.created", final_event_types)
 
     def test_replace_abandons_previous_goal_and_starts_a_new_one(self):
         Category.objects.create(name="Monitores", slug="monitores")

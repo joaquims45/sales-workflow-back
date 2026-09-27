@@ -18,6 +18,18 @@ NEED_KEYWORDS = {
     "office": ["oficina", "trabajo", "documentos"],
 }
 
+PURCHASE_INTENT_KEYWORDS = [
+    "comprar",
+    "comprarla",
+    "comprarlo",
+    "la compro",
+    "lo compro",
+    "quiero llevarla",
+    "quiero llevarlo",
+    "me la llevo",
+    "me lo llevo",
+]
+
 
 def extract_needs(text: str) -> list[str]:
     lowered = text.lower()
@@ -30,3 +42,8 @@ def extract_budget(text: str) -> int | None:
         return None
     raw_value = match.group(1).replace(".", "").replace(",", "")
     return int(raw_value)
+
+
+def extract_purchase_intent(text: str) -> bool:
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in PURCHASE_INTENT_KEYWORDS)

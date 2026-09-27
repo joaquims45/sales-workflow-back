@@ -1,9 +1,13 @@
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 
 from django.test import SimpleTestCase, TestCase
 
 from apps.catalog.models import Category, Product
+from apps.conversations.models import Conversation
+from apps.orders.models import Order
+from apps.payments.models import Payment
 
 from .extraction import extract_budget, extract_needs
 from .orchestrator import run_replace, run_side_query
@@ -96,6 +100,77 @@ class ProductPurchaseGraphTests(TestCase):
 
         self.assertEqual(new_state["candidate_products"], [])
         self.assertIn("No encontré", reply)
+
+    def test_purchases_the_only_candidate_when_intent_expressed(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["candidate_products"] = [self.gaming_laptop.id]
+
+        new_state, reply = run_product_purchase(state, "Quiero comprarla.")
+
+        self.assertEqual(new_state["selected_product_id"], self.gaming_laptop.id)
+        self.assertTrue(new_state["checkout_ready"])
+        self.assertIn("Listo", reply)
+
+        order = Order.objects.get()
+        self.assertEqual(order.total, Decimal("1400000.00"))
+        self.assertEqual(order.conversation_id, conversation.id)
+        self.assertEqual(Payment.objects.get().status, Payment.Status.PENDING)
+
+    def test_matches_candidate_by_name_among_several(self):
+        conversation = Conversation.objects.create()
+        office_laptop = Product.objects.create(
+            category=self.gaming_laptop.category,
+            name="Dell Inspiron 15",
+            slug="dell-inspiron-15",
+            description="Notebook de oficina.",
+            use_cases=["office"],
+            price="800000.00",
+            stock=10,
+        )
+        state = build_initial_state(conversation_id=conversation.id)
+        state["candidate_products"] = [self.gaming_laptop.id, office_laptop.id]
+
+        new_state, reply = run_product_purchase(state, "Quiero comprar la ASUS.")
+
+        self.assertEqual(new_state["selected_product_id"], self.gaming_laptop.id)
+        self.assertTrue(new_state["checkout_ready"])
+        self.assertIn("Listo", reply)
+
+    def test_asks_which_product_when_ambiguous(self):
+        conversation = Conversation.objects.create()
+        office_laptop = Product.objects.create(
+            category=self.gaming_laptop.category,
+            name="Dell Inspiron 15",
+            slug="dell-inspiron-15",
+            description="Notebook de oficina.",
+            use_cases=["office"],
+            price="800000.00",
+            stock=10,
+        )
+        state = build_initial_state(conversation_id=conversation.id)
+        state["candidate_products"] = [self.gaming_laptop.id, office_laptop.id]
+
+        new_state, reply = run_product_purchase(state, "Quiero comprarla.")
+
+        self.assertIsNone(new_state["selected_product_id"])
+        self.assertFalse(new_state["checkout_ready"])
+        self.assertIn(self.gaming_laptop.name, reply)
+        self.assertIn(office_laptop.name, reply)
+        self.assertEqual(Order.objects.count(), 0)
+
+    def test_reports_out_of_stock_product(self):
+        conversation = Conversation.objects.create()
+        self.gaming_laptop.stock = 0
+        self.gaming_laptop.save()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["candidate_products"] = [self.gaming_laptop.id]
+
+        new_state, reply = run_product_purchase(state, "Quiero comprarla.")
+
+        self.assertFalse(new_state["checkout_ready"])
+        self.assertIn("stock", reply.lower())
+        self.assertEqual(Order.objects.count(), 0)
 
 
 class ShippingQueryGraphTests(SimpleTestCase):
