@@ -81,6 +81,27 @@ class ConversationAPITests(APITestCase):
         self.assertEqual(len(response.data["messages"]), 2)
         self.assertEqual(response.data["messages"][0]["content"], "Hola")
 
+    def test_trace_endpoint_returns_events_in_chronological_order(self):
+        conversation = Conversation.objects.create()
+        messages_url = reverse("conversation-messages", args=[conversation.pk])
+        self.client.post(messages_url, {"content": "Busco una notebook gamer."}, format="json")
+
+        trace_url = reverse("conversation-trace", args=[conversation.pk])
+        response = self.client.get(trace_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        event_types = [item["event_type"] for item in response.data]
+        self.assertEqual(event_types[0], "message.received")
+        self.assertEqual(event_types[-1], "message.processed")
+        self.assertIn("jev.decision", event_types)
+        self.assertIn("routing.completed", event_types)
+
+        jev_event = next(item for item in response.data if item["event_type"] == "jev.decision")
+        self.assertIn("latency_ms", jev_event["payload"])
+
+        processed_event = response.data[-1]
+        self.assertIn("latency_ms", processed_event["payload"])
+
 
 class ConversationScenarioTests(APITestCase):
     """The golden-path scenario from PLAN.MD §25/ARCHITECTURE.md §8:
