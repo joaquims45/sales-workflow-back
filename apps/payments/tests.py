@@ -3,10 +3,12 @@ from decimal import Decimal
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.conversations.models import Conversation
 from apps.orders.models import Order
 from providers.payments.mock import MockPaymentProvider
 
 from .models import Checkout, Payment
+from .services import update_payment_status
 
 
 class CheckoutPaymentModelTests(TestCase):
@@ -113,3 +115,54 @@ class MockCheckoutEndpointsTests(TestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 404)
+
+    def test_approve_confirms_the_order(self):
+        url = reverse("mock-checkout-approve", args=[self.result.external_reference])
+        self.client.post(url)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.CONFIRMED)
+
+    def test_reject_leaves_the_order_pending(self):
+        url = reverse("mock-checkout-reject", args=[self.result.external_reference])
+        self.client.post(url)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PENDING)
+
+
+class UpdatePaymentStatusTests(TestCase):
+    def setUp(self):
+        self.conversation = Conversation.objects.create()
+        self.order = Order.objects.create(conversation=self.conversation, total=Decimal("1400000.00"))
+        self.checkout = Checkout.objects.create(order=self.order, provider="mock")
+        self.payment = Payment.objects.create(checkout=self.checkout, amount=self.order.total)
+
+    def test_approving_confirms_the_order_and_emits_event(self):
+        update_payment_status(self.payment, Payment.Status.APPROVED)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.CONFIRMED)
+
+        event_types = list(self.conversation.events.values_list("event_type", flat=True))
+        self.assertIn("payment.approved", event_types)
+
+    def test_rejecting_does_not_confirm_the_order(self):
+        update_payment_status(self.payment, Payment.Status.REJECTED)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PENDING)
+
+        event_types = list(self.conversation.events.values_list("event_type", flat=True))
+        self.assertIn("payment.rejected", event_types)
+
+    def test_skips_event_emission_without_a_conversation(self):
+        order = Order.objects.create(total=Decimal("1000.00"))
+        checkout = Checkout.objects.create(order=order, provider="mock")
+        payment = Payment.objects.create(checkout=checkout, amount=order.total)
+
+        # Should not raise even though there's no conversation to notify.
+        update_payment_status(payment, Payment.Status.APPROVED)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CONFIRMED)

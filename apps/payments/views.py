@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from .models import Checkout, Payment
+from .services import update_payment_status
 
 
 def _get_latest_payment(external_reference: str) -> Payment:
@@ -35,8 +36,7 @@ def mock_checkout_page(request, external_reference):
 @require_POST
 def approve_mock_payment(request, external_reference):
     payment = _get_latest_payment(external_reference)
-    payment.status = Payment.Status.APPROVED
-    payment.save(update_fields=["status", "updated_at"])
+    payment = update_payment_status(payment, Payment.Status.APPROVED)
     return JsonResponse({"status": payment.status})
 
 
@@ -44,6 +44,5 @@ def approve_mock_payment(request, external_reference):
 @require_POST
 def reject_mock_payment(request, external_reference):
     payment = _get_latest_payment(external_reference)
-    payment.status = Payment.Status.REJECTED
-    payment.save(update_fields=["status", "updated_at"])
+    payment = update_payment_status(payment, Payment.Status.REJECTED)
     return JsonResponse({"status": payment.status})
