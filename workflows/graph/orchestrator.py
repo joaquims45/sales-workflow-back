@@ -14,6 +14,10 @@ completes, restoring active_workflow/active_node from workflow_stack.
 from __future__ import annotations
 
 import logging
+import time
+
+from apps.conversations.models import Conversation
+from events.bus import emit_event
 
 from .product_purchase import run_product_purchase
 from .shipping_query import run_shipping_query
@@ -23,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 def run_side_query(state: SalesState, message_text: str) -> tuple[SalesState, str]:
+    # From the main graph's point of view, SHIPPING_QUERY is one node —
+    # node.started fires once (when it's first entered), node.completed
+    # only once it actually resolves (may span more than one turn if it
+    # had to ask for a destination first).
+    conversation = Conversation.objects.filter(pk=state["conversation_id"]).first()
+
     # If we're already mid a SHIPPING_QUERY (it asked for a destination and
     # got none last turn), this message answers that — don't push another
     # frame onto the stack, just re-run shipping with the new message.
@@ -42,14 +52,28 @@ def run_side_query(state: SalesState, message_text: str) -> tuple[SalesState, st
         state["active_workflow"] = "SHIPPING_QUERY"
         state["active_node"] = "EXTRACT_DESTINATION"
 
+        if conversation is not None:
+            emit_event(conversation, "node.started", {"node": "SHIPPING_QUERY", "workflow": "SHIPPING_QUERY"})
+
+    started_at = time.perf_counter()
     reply, resolved = run_shipping_query(message_text)
+    duration_ms = (time.perf_counter() - started_at) * 1000
 
     if not resolved:
         # Still no usable destination — stay suspended so the next message
         # comes straight back here instead of being routed from scratch.
+        # No node.completed yet: it's still running, just waiting on the
+        # customer's next message.
         state["routing_decision"] = RoutingDecision.SIDE_QUERY
         state["routing_confidence"] = 1.0
         return state, reply
+
+    if conversation is not None:
+        emit_event(
+            conversation,
+            "node.completed",
+            {"node": "SHIPPING_QUERY", "workflow": "SHIPPING_QUERY", "duration_ms": round(duration_ms, 2)},
+        )
 
     if state["workflow_stack"]:
         frame = state["workflow_stack"][-1]

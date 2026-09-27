@@ -196,6 +196,35 @@ class ProductPurchaseGraphTests(TestCase):
         self.assertIn("stock", reply.lower())
         self.assertEqual(Order.objects.count(), 0)
 
+    def test_emits_node_started_and_completed_for_each_node_visited(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+
+        run_product_purchase(state, "Busco una notebook para programar y jugar.")
+
+        events = list(conversation.events.order_by("created_at").values_list("event_type", "payload"))
+        started_nodes = [payload["node"] for event_type, payload in events if event_type == "node.started"]
+        completed = [
+            (payload["node"], payload["duration_ms"]) for event_type, payload in events if event_type == "node.completed"
+        ]
+
+        # Only DISCOVERY runs this turn (no budget yet -> ends at ASK_FOR_BUDGET).
+        self.assertEqual(started_nodes, ["DISCOVERY", "ASK_FOR_BUDGET"])
+        self.assertEqual([node for node, _duration in completed], ["DISCOVERY", "ASK_FOR_BUDGET"])
+        for _node, duration_ms in completed:
+            self.assertIsInstance(duration_ms, float)
+            self.assertGreaterEqual(duration_ms, 0)
+
+    def test_does_not_emit_events_for_an_unknown_conversation(self):
+        # conversation_id=1 with no matching row — instrumentation should
+        # skip silently rather than raise.
+        state = build_initial_state(conversation_id=999999)
+
+        new_state, reply = run_product_purchase(state, "hola")
+
+        self.assertTrue(reply)
+        self.assertEqual(new_state["active_workflow"], "PRODUCT_PURCHASE")
+
 
 class ShippingQueryGraphTests(SimpleTestCase):
     def test_quotes_a_serviceable_destination(self):
@@ -218,7 +247,10 @@ class ShippingQueryGraphTests(SimpleTestCase):
         self.assertFalse(resolved)
 
 
-class RunSideQueryTests(SimpleTestCase):
+class RunSideQueryTests(TestCase):
+    # TestCase, not SimpleTestCase: run_side_query now looks up the
+    # Conversation to emit node.started/completed (workflows/graph/
+    # orchestrator.py), which needs real DB access.
     def test_suspends_and_resumes_active_workflow(self):
         state = build_initial_state(conversation_id=1)
         state["active_workflow"] = "PRODUCT_PURCHASE"
@@ -272,11 +304,41 @@ class RunSideQueryTests(SimpleTestCase):
         self.assertEqual(new_state["active_node"], "RECOMMENDATION")
         self.assertEqual(new_state["workflow_stack"], [])
 
+    def test_emits_one_started_and_completed_pair_when_resolved_in_one_turn(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["active_workflow"] = "PRODUCT_PURCHASE"
+        state["active_node"] = "RECOMMENDATION"
+
+        run_side_query(state, "¿Hacen envíos a Santa Fe?")
+
+        event_types = list(conversation.events.order_by("created_at").values_list("event_type", flat=True))
+        self.assertEqual(event_types.count("node.started"), 1)
+        self.assertEqual(event_types.count("node.completed"), 1)
+
+    def test_does_not_emit_completed_while_still_waiting_for_destination(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["active_workflow"] = "PRODUCT_PURCHASE"
+        state["active_node"] = "RECOMMENDATION"
+
+        state, _reply = run_side_query(state, "¿Hacen envíos?")
+
+        event_types = list(conversation.events.order_by("created_at").values_list("event_type", flat=True))
+        self.assertEqual(event_types.count("node.started"), 1)
+        self.assertEqual(event_types.count("node.completed"), 0)
+
+        # Follow-up resolves it — completes, and does NOT re-emit started.
+        run_side_query(state, "Santa Fe")
+
+        event_types = list(conversation.events.order_by("created_at").values_list("event_type", flat=True))
+        self.assertEqual(event_types.count("node.started"), 1)
+        self.assertEqual(event_types.count("node.completed"), 1)
+
 
 class RunReplaceTests(TestCase):
     def setUp(self):
-        # Same reasoning as ProductPurchaseGraphTests: isolate from whatever
-        # FAISS index exists on the developer's machine.
+       |
         tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(tmp_dir.cleanup)
         override = self.settings(FAISS_INDEX_PATH=str(Path(tmp_dir.name) / "unused.bin"))

@@ -23,6 +23,7 @@ from providers.reply import generate_reply
 from tools.product_tools import ProductConstraints, search_products
 
 from .extraction import extract_budget, extract_needs, extract_purchase_intent
+from .instrumentation import instrument
 from .state import FunnelStage, PrimaryGoal, SalesState
 
 SALES_STATE_FIELDS = tuple(SalesState.__annotations__.keys())
@@ -226,16 +227,27 @@ def checkout_node(state: ProductPurchaseGraphState) -> dict:
     return {"reply": reply, "active_node": "CHECKOUT", "checkout_ready": True}
 
 
+def _instrumented(node_name: str, fn):
+    """Wraps a node so LangGraph's execution of it emits node.started/
+    completed/failed (workflows/graph/instrumentation.py) — the node
+    functions above stay pure and unaware of events."""
+
+    def wrapper(state: ProductPurchaseGraphState) -> dict:
+        return instrument(state["conversation_id"], node_name, "PRODUCT_PURCHASE", lambda: fn(state))
+
+    return wrapper
+
+
 def build_product_purchase_graph():
     graph = StateGraph(ProductPurchaseGraphState)
 
-    graph.add_node("discovery", discovery_node)
-    graph.add_node("ask_for_budget", ask_for_budget_node)
-    graph.add_node("product_search", product_search_node)
-    graph.add_node("recommendation", recommendation_node)
-    graph.add_node("select_product", select_product_node)
-    graph.add_node("ask_which_product", ask_which_product_node)
-    graph.add_node("checkout", checkout_node)
+    graph.add_node("discovery", _instrumented("DISCOVERY", discovery_node))
+    graph.add_node("ask_for_budget", _instrumented("ASK_FOR_BUDGET", ask_for_budget_node))
+    graph.add_node("product_search", _instrumented("PRODUCT_SEARCH", product_search_node))
+    graph.add_node("recommendation", _instrumented("RECOMMENDATION", recommendation_node))
+    graph.add_node("select_product", _instrumented("SELECT_PRODUCT", select_product_node))
+    graph.add_node("ask_which_product", _instrumented("ASK_WHICH_PRODUCT", ask_which_product_node))
+    graph.add_node("checkout", _instrumented("CHECKOUT", checkout_node))
 
     graph.set_entry_point("discovery")
     graph.add_conditional_edges(

@@ -206,6 +206,21 @@ class ConversationScenarioTests(APITestCase):
         self.assertEqual(event_types.count("jev.decision"), 3)
         self.assertEqual(event_types.count("routing.completed"), 3)
 
+        # node.started/completed should reach real conversation.events
+        # through the full REST path, not just in graph-level unit tests —
+        # DISCOVERY for the opening turn, SHIPPING_QUERY for the side query.
+        node_events = [
+            (event_type, payload["node"])
+            for event_type, payload in conversation.events.order_by("created_at").values_list(
+                "event_type", "payload"
+            )
+            if event_type in ("node.started", "node.completed")
+        ]
+        self.assertIn(("node.started", "DISCOVERY"), node_events)
+        self.assertIn(("node.completed", "DISCOVERY"), node_events)
+        self.assertIn(("node.started", "SHIPPING_QUERY"), node_events)
+        self.assertIn(("node.completed", "SHIPPING_QUERY"), node_events)
+
         # "Perfecto, quiero comprarla." (PLAN.MD §25): the workflow resumed
         # after shipping should still be able to close the sale.
         purchase_response = self._post_message(conversation, "Perfecto, quiero comprarla.")
