@@ -145,3 +145,10 @@ MAILERS = {
 # so the index survives container restarts (see ARCHITECTURE.md §15/§26).
 
 FAISS_INDEX_PATH = env('FAISS_INDEX_PATH', default=str(BASE_DIR / 'data' / 'faiss_index.bin'))
+
+
+# Routing / Jev
+# Optional. Without it, message routing falls back to always-CONTINUE
+# (see workflows/routing/jev_router.py).
+
+TYPESAFE_API_KEY = env('TYPESAFE_API_KEY', default='')

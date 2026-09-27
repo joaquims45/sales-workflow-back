@@ -1,13 +1,15 @@
 """Decision model abstraction for message routing (ARCHITECTURE.md §11).
 
-This is the routing *skeleton*: it defines the contract the real Jev
-integration will implement next, wired behind `get_decision_model()` so the
-router (and everything upstream of it) never depends on Jev directly.
+`DecisionModel` is the contract the router depends on; it never talks to
+Jev directly. `get_decision_model()` resolves to the real Jev integration
+(workflows/routing/jev_router.py) when TYPESAFE_API_KEY is configured, and
+to `AlwaysContinueDecisionModel` otherwise — the same resolver pattern used
+for `PaymentProvider` (mock by default, real provider behind config).
 
-The default implementation always returns CONTINUE. It exists so the router
-pipe can be exercised end-to-end before Jev is integrated — SIDE_QUERY and
-REPLACE have no workflow to act on yet (that's M7/M8), so always continuing
-is the correct behavior for now, not a shortcut.
+`AlwaysContinueDecisionModel` always returning CONTINUE is intentional, not
+a shortcut: SIDE_QUERY and REPLACE have no workflow to act on yet
+(that lands in M7/M8), so always continuing is the correct behavior for a
+project that hasn't configured Jev.
 """
 
 from __future__ import annotations
@@ -27,11 +29,13 @@ class DecisionModel(Protocol):
 
 
 class AlwaysContinueDecisionModel:
-    """Placeholder decision model — replaced by Jev in the next milestone."""
+    """Fallback decision model used when Jev isn't configured."""
 
     def decide(self, message_text: str, state: SalesState) -> RoutingResult:
         return {"decision": RoutingDecision.CONTINUE, "confidence": 1.0}
 
 
 def get_decision_model() -> DecisionModel:
-    return AlwaysContinueDecisionModel()
+    from .jev_router import get_jev_decision_model
+
+    return get_jev_decision_model()
