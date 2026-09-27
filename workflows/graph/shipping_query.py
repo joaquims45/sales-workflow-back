@@ -15,6 +15,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from providers.reply import generate_reply
 from tools.shipping_tools import SHIPPING_ZONES, calculate_shipping
 
 
@@ -40,7 +41,12 @@ def route_after_extract(state: ShippingQueryState) -> str:
 
 
 def ask_for_destination_node(state: ShippingQueryState) -> dict:
-    return {"reply": "¿A qué localidad querés que te cotice el envío?"}
+    reply = generate_reply(
+        "Ask which city/town to calculate shipping cost for.",
+        {},
+        "¿A qué localidad querés que te cotice el envío?",
+    )
+    return {"reply": reply}
 
 
 def validate_destination_node(state: ShippingQueryState) -> dict:
@@ -53,7 +59,12 @@ def route_after_validate(state: ShippingQueryState) -> str:
 
 
 def not_serviceable_node(state: ShippingQueryState) -> dict:
-    return {"reply": f"Por ahora no hacemos envíos a {state['destination']}."}
+    reply = generate_reply(
+        "We don't ship to this destination yet. Apologize briefly.",
+        {"destination": state["destination"]},
+        f"Por ahora no hacemos envíos a {state['destination']}.",
+    )
+    return {"reply": reply}
 
 
 def calculate_shipping_node(state: ShippingQueryState) -> dict:
@@ -62,9 +73,19 @@ def calculate_shipping_node(state: ShippingQueryState) -> dict:
 
 
 def generate_answer_node(state: ShippingQueryState) -> dict:
-    reply = (
+    fallback = (
         f"Sí, hacemos envíos a {state['destination']}. "
         f"Tarda {state['shipping_days']} día(s) hábiles y cuesta ${state['shipping_cost']}."
+    )
+    facts = {
+        "destination": state["destination"],
+        "cost": state["shipping_cost"],
+        "days": state["shipping_days"],
+    }
+    reply = generate_reply(
+        "Confirm we ship to this destination, stating the cost and delivery time.",
+        facts,
+        fallback,
     )
     return {"reply": reply}
 
@@ -101,7 +122,16 @@ def build_shipping_query_graph():
 _SHIPPING_QUERY_GRAPH = build_shipping_query_graph()
 
 
-def run_shipping_query(message_text: str) -> str:
+def run_shipping_query(message_text: str) -> tuple[str, bool]:
+    """Returns (reply, resolved).
+
+    resolved=False only when the message had no usable destination and the
+    graph had to ask for one — the caller (workflows/graph/orchestrator.py)
+    uses this to keep the conversation suspended in SHIPPING_QUERY instead
+    of resuming, so the next message (the actual destination) comes back
+    here instead of being routed as if nothing was pending.
+    """
+
     result = _SHIPPING_QUERY_GRAPH.invoke(
         {
             "incoming_message": message_text,
@@ -112,4 +142,4 @@ def run_shipping_query(message_text: str) -> str:
             "reply": "",
         }
     )
-    return result["reply"]
+    return result["reply"], result["destination"] is not None

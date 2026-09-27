@@ -166,6 +166,17 @@ JEV_CONFIDENCE_HIGH = env.float('JEV_CONFIDENCE_HIGH', default=0.85)
 JEV_CONFIDENCE_LOW = env.float('JEV_CONFIDENCE_LOW', default=0.6)
 
 
+# OpenAI (ARCHITECTURE.md §36)
+# Optional. Without it, embeddings fall back to the offline hashing
+# provider and routing escalation falls back to a no-op (providers/
+# embeddings.py, providers/llm.py). Powers both once set.
+
+OPENAI_API_KEY = env('OPENAI_API_KEY', default='')
+OPENAI_EMBEDDING_MODEL = env('OPENAI_EMBEDDING_MODEL', default='text-embedding-3-small')
+OPENAI_EMBEDDING_DIMENSIONS = env.int('OPENAI_EMBEDDING_DIMENSIONS', default=512)
+OPENAI_LLM_MODEL = env('OPENAI_LLM_MODEL', default='gpt-4o-mini')
+
+
 # Real-time events (ARCHITECTURE.md §20)
 # In-memory by default, so WebSocket events work with zero setup (single
 # process only — fine for local dev/tests). Set REDIS_URL to use Redis, the
@@ -204,3 +215,11 @@ CORS_ALLOWED_ORIGINS = env.list(
 # environment unless explicitly overridden.
 
 PAYMENT_PROVIDER = env('PAYMENT_PROVIDER', default='mock')
+
+
+# Testing (ARCHITECTURE.md §47)
+# Blanks external API credentials for the duration of `manage.py test`, so
+# the suite never makes a real, billed call even if the developer's .env
+# has real keys configured for local development.
+
+TEST_RUNNER = 'config.testrunner.NoExternalCredentialsTestRunner'

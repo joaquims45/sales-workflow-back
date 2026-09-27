@@ -1,6 +1,7 @@
 import tempfile
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
 
@@ -101,6 +102,29 @@ class ProductPurchaseGraphTests(TestCase):
         self.assertEqual(new_state["candidate_products"], [])
         self.assertIn("No encontré", reply)
 
+    def test_explicit_budget_unknown_searches_instead_of_asking_again(self):
+        # Regression: without this, a customer who says "no sé" gets the
+        # exact same "¿qué presupuesto tenés?" forever.
+        state = build_initial_state(conversation_id=1)
+        state["customer_needs"] = ["gaming", "programming"]
+
+        fake_provider = mock.Mock()
+        fake_provider.extract.return_value = {
+            "needs": ["gaming"],
+            "budget_max": None,
+            "budget_unknown": True,
+        }
+
+        with mock.patch(
+            "workflows.graph.product_purchase.get_discovery_extraction_provider",
+            return_value=fake_provider,
+        ):
+            new_state, reply = run_product_purchase(state, "No sé, busco alguna placa de video.")
+
+        self.assertIsNone(new_state["constraints"].get("budget_max"))
+        self.assertNotIn("presupuesto", reply.lower())
+        self.assertIn(self.gaming_laptop.id, new_state["candidate_products"])
+
     def test_purchases_the_only_candidate_when_intent_expressed(self):
         conversation = Conversation.objects.create()
         state = build_initial_state(conversation_id=conversation.id)
@@ -175,20 +199,23 @@ class ProductPurchaseGraphTests(TestCase):
 
 class ShippingQueryGraphTests(SimpleTestCase):
     def test_quotes_a_serviceable_destination(self):
-        reply = run_shipping_query("¿Hacen envíos a Santa Fe?")
+        reply, resolved = run_shipping_query("¿Hacen envíos a Santa Fe?")
 
         self.assertIn("Santa Fe", reply)
         self.assertIn("$12000", reply)
+        self.assertTrue(resolved)
 
-    def test_reports_unserviceable_destination(self):
-        reply = run_shipping_query("¿Hacen envíos a la Antártida?")
+    def test_unrecognized_destination_asks_again_and_is_not_resolved(self):
+        reply, resolved = run_shipping_query("¿Hacen envíos a la Antártida?")
 
         self.assertIn("¿A qué localidad", reply)
+        self.assertFalse(resolved)
 
     def test_asks_for_destination_when_none_mentioned(self):
-        reply = run_shipping_query("¿Hacen envíos?")
+        reply, resolved = run_shipping_query("¿Hacen envíos?")
 
         self.assertIn("¿A qué localidad", reply)
+        self.assertFalse(resolved)
 
 
 class RunSideQueryTests(SimpleTestCase):
@@ -216,6 +243,33 @@ class RunSideQueryTests(SimpleTestCase):
 
         self.assertIsNone(new_state["active_workflow"])
         self.assertIsNone(new_state["active_node"])
+        self.assertEqual(new_state["workflow_stack"], [])
+
+    def test_missing_destination_stays_suspended_for_a_follow_up(self):
+        # Regression: "¿Hacen envíos?" (no destination) used to resume
+        # immediately, so the next message (the actual destination) was
+        # routed from scratch instead of answering the pending question.
+        state = build_initial_state(conversation_id=1)
+        state["active_workflow"] = "PRODUCT_PURCHASE"
+        state["active_node"] = "RECOMMENDATION"
+
+        state, reply = run_side_query(state, "¿Hacen envíos?")
+
+        self.assertIn("¿A qué localidad", reply)
+        self.assertEqual(state["interruption"], "SHIPPING_QUERY")
+        self.assertEqual(state["active_workflow"], "SHIPPING_QUERY")
+        self.assertEqual(state["suspended_workflow"], "PRODUCT_PURCHASE")
+        self.assertEqual(state["suspended_node"], "RECOMMENDATION")
+        self.assertEqual(len(state["workflow_stack"]), 1)
+
+        # The follow-up answers the pending question — same call, doesn't
+        # push a second frame, and now actually resumes.
+        new_state, second_reply = run_side_query(state, "Santa Fe")
+
+        self.assertIn("Santa Fe", second_reply)
+        self.assertIsNone(new_state["interruption"])
+        self.assertEqual(new_state["active_workflow"], "PRODUCT_PURCHASE")
+        self.assertEqual(new_state["active_node"], "RECOMMENDATION")
         self.assertEqual(new_state["workflow_stack"], [])
 
 

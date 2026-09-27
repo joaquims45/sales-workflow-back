@@ -1,14 +1,17 @@
 import tempfile
 from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 import faiss
+import numpy as np
 from django.core.management import call_command
 from django.test import TestCase
 
 from apps.catalog.models import Category, Product
 
 from .indexer import build_index, build_product_text
+from .retriever import semantic_search
 
 
 class RagIndexerTests(TestCase):
@@ -65,3 +68,47 @@ class RagIndexerTests(TestCase):
         call_command("reindex_products", stdout=out)
 
         self.assertIn("Indexed 1 product(s).", out.getvalue())
+
+
+class RagRetrieverTests(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(name="Notebooks", slug="notebooks")
+        self.product = Product.objects.create(
+            category=self.category,
+            name="ASUS TUF Gaming A15",
+            slug="asus-tuf-gaming-a15",
+            description="Notebook gamer para programar y jugar.",
+            use_cases=["gaming", "programming"],
+            price="1400000.00",
+            stock=5,
+        )
+
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self.index_path = Path(self._tmp_dir.name) / "faiss_index.bin"
+        self.addCleanup(self._tmp_dir.cleanup)
+        self._override = self.settings(FAISS_INDEX_PATH=str(self.index_path))
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+
+    def test_returns_none_without_a_built_index(self):
+        self.assertIsNone(semantic_search("notebook gamer"))
+
+    def test_returns_ranked_ids_once_indexed(self):
+        build_index()
+
+        ids = semantic_search("notebook para programar y jugar")
+
+        self.assertIn(self.product.id, ids)
+
+    def test_falls_back_when_index_dimension_does_not_match_current_provider(self):
+        # Simulates switching embedding providers (e.g. adding
+        # OPENAI_API_KEY) without running reindex_products afterwards.
+        build_index()
+
+        mismatched_provider = mock.Mock()
+        mismatched_provider.embed.return_value = np.zeros((1, 9999), dtype="float32")
+
+        with mock.patch("rag.retriever.get_embedding_provider", return_value=mismatched_provider):
+            result = semantic_search("notebook gamer")
+
+        self.assertIsNone(result)

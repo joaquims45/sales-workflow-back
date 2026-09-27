@@ -18,6 +18,8 @@ from langgraph.graph import END, StateGraph
 from apps.catalog.models import Product
 from apps.conversations.models import Conversation
 from apps.orders.services import InsufficientStock, ProductUnavailable, create_checkout_for_product
+from providers.discovery import get_discovery_extraction_provider
+from providers.reply import generate_reply
 from tools.product_tools import ProductConstraints, search_products
 
 from .extraction import extract_budget, extract_needs, extract_purchase_intent
@@ -29,27 +31,41 @@ SALES_STATE_FIELDS = tuple(SalesState.__annotations__.keys())
 class ProductPurchaseGraphState(SalesState):
     incoming_message: str
     reply: str
+    budget_unknown: bool
 
 
 def discovery_node(state: ProductPurchaseGraphState) -> dict:
-    updates: dict = {"active_node": "DISCOVERY"}
+    updates: dict = {"active_node": "DISCOVERY", "budget_unknown": False}
 
     if state["primary_goal"] is None:
         updates["primary_goal"] = PrimaryGoal.BUY_PRODUCT
         updates["active_workflow"] = "PRODUCT_PURCHASE"
 
     text = state["incoming_message"]
-
     needs = list(state["customer_needs"])
-    for need in extract_needs(text):
-        if need not in needs:
-            needs.append(need)
-    updates["customer_needs"] = needs
-
     constraints = dict(state["constraints"])
-    budget = extract_budget(text)
-    if budget is not None:
-        constraints["budget_max"] = budget
+
+    # Uses OpenAI when configured (understands free-form needs and "I don't
+    # know my budget"); falls back to the deterministic keyword extraction
+    # below otherwise (providers/discovery.py).
+    extraction = get_discovery_extraction_provider().extract(text, state)
+
+    if extraction is not None:
+        for need in extraction["needs"]:
+            if need not in needs:
+                needs.append(need)
+        if extraction["budget_max"] is not None:
+            constraints["budget_max"] = extraction["budget_max"]
+        updates["budget_unknown"] = extraction["budget_unknown"]
+    else:
+        for need in extract_needs(text):
+            if need not in needs:
+                needs.append(need)
+        budget = extract_budget(text)
+        if budget is not None:
+            constraints["budget_max"] = budget
+
+    updates["customer_needs"] = needs
     updates["constraints"] = constraints
 
     if state["funnel_stage"] == FunnelStage.DISCOVERY and (needs or constraints):
@@ -65,14 +81,21 @@ def route_after_discovery(state: ProductPurchaseGraphState) -> str:
     if wants_to_buy and has_a_product_in_mind:
         return "select_product"
 
-    return "product_search" if state["constraints"].get("budget_max") is not None else "ask_for_budget"
+    has_enough_to_search = state["constraints"].get("budget_max") is not None or state.get(
+        "budget_unknown", False
+    )
+    return "product_search" if has_enough_to_search else "ask_for_budget"
 
 
 def ask_for_budget_node(state: ProductPurchaseGraphState) -> dict:
     if state["customer_needs"]:
-        reply = "¿Qué presupuesto tenés?"
+        situation = "Ask the customer what budget (in local currency) they have in mind for the purchase."
+        fallback = "¿Qué presupuesto tenés?"
     else:
-        reply = "Contame qué estás buscando y con qué presupuesto contás."
+        situation = "Ask the customer what they're looking for and what budget they have in mind."
+        fallback = "Contame qué estás buscando y con qué presupuesto contás."
+
+    reply = generate_reply(situation, {"customer_needs": state["customer_needs"]}, fallback)
     return {"reply": reply}
 
 
@@ -89,9 +112,15 @@ def product_search_node(state: ProductPurchaseGraphState) -> dict:
 def recommendation_node(state: ProductPurchaseGraphState) -> dict:
     ids = state["candidate_products"]
     if not ids:
-        reply = (
+        fallback = (
             "No encontré productos que cumplan esas condiciones. "
             "¿Querés ajustar el presupuesto o contarme más sobre lo que buscás?"
+        )
+        reply = generate_reply(
+            "No products matched the customer's needs/budget. Ask if they want to adjust the "
+            "budget or share more about what they need.",
+            {"customer_needs": state["customer_needs"], "budget_max": state["constraints"].get("budget_max")},
+            fallback,
         )
         return {"reply": reply, "active_node": "RECOMMENDATION"}
 
@@ -99,7 +128,20 @@ def recommendation_node(state: ProductPurchaseGraphState) -> dict:
     ordered = [products_by_id[product_id] for product_id in ids if product_id in products_by_id]
 
     lines = [f"- {product.name} (${product.price}) — {', '.join(product.use_cases)}" for product in ordered]
-    reply = "Encontré estas opciones para vos:\n" + "\n".join(lines)
+    fallback = "Encontré estas opciones para vos:\n" + "\n".join(lines)
+
+    facts = {
+        "products": [
+            {"name": product.name, "price": str(product.price), "use_cases": product.use_cases}
+            for product in ordered
+        ]
+    }
+    reply = generate_reply(
+        "Present these product options to the customer as recommendations, mentioning name and "
+        "price for each.",
+        facts,
+        fallback,
+    )
 
     return {"reply": reply, "active_node": "RECOMMENDATION"}
 
@@ -130,9 +172,15 @@ def route_after_select(state: ProductPurchaseGraphState) -> str:
 
 
 def ask_which_product_node(state: ProductPurchaseGraphState) -> dict:
-    products = Product.objects.filter(id__in=state["candidate_products"])
-    names = ", ".join(product.name for product in products)
-    return {"reply": f"¿Cuál de estas opciones querés? {names}"}
+    product_names = [product.name for product in Product.objects.filter(id__in=state["candidate_products"])]
+    fallback = f"¿Cuál de estas opciones querés? {', '.join(product_names)}"
+
+    reply = generate_reply(
+        "Ask the customer which of these product options they want to buy.",
+        {"products": product_names},
+        fallback,
+    )
+    return {"reply": reply}
 
 
 def checkout_node(state: ProductPurchaseGraphState) -> dict:
@@ -144,19 +192,36 @@ def checkout_node(state: ProductPurchaseGraphState) -> dict:
             conversation=conversation,
         )
     except ProductUnavailable:
-        return {
-            "reply": "Ese producto ya no está disponible. ¿Querés ver otra opción?",
-            "active_node": "CHECKOUT",
-        }
+        fallback = "Ese producto ya no está disponible. ¿Querés ver otra opción?"
+        reply = generate_reply(
+            "The selected product is no longer available. Apologize briefly and offer to show alternatives.",
+            {},
+            fallback,
+        )
+        return {"reply": reply, "active_node": "CHECKOUT"}
     except InsufficientStock:
-        return {
-            "reply": "Justo se quedó sin stock ese producto. ¿Querés que te muestre otra opción?",
-            "active_node": "CHECKOUT",
-        }
+        fallback = "Justo se quedó sin stock ese producto. ¿Querés que te muestre otra opción?"
+        reply = generate_reply(
+            "The selected product just ran out of stock. Apologize briefly and offer alternatives.",
+            {},
+            fallback,
+        )
+        return {"reply": reply, "active_node": "CHECKOUT"}
 
-    reply = (
+    fallback = (
         f"¡Listo! Creé tu orden #{outcome.order.id} por ${outcome.order.total}. "
         f"Para completar el pago entrá a {outcome.checkout_result.checkout_url}"
+    )
+    facts = {
+        "order_id": outcome.order.id,
+        "total": str(outcome.order.total),
+        "checkout_url": outcome.checkout_result.checkout_url,
+    }
+    reply = generate_reply(
+        "The order was created successfully. Tell the customer, mention the total, and tell them "
+        "to use the checkout_url link to complete the payment.",
+        facts,
+        fallback,
     )
     return {"reply": reply, "active_node": "CHECKOUT", "checkout_ready": True}
 
@@ -202,7 +267,12 @@ _PRODUCT_PURCHASE_GRAPH = build_product_purchase_graph()
 def run_product_purchase(state: SalesState, message_text: str) -> tuple[SalesState, str]:
     """Run one turn of the PRODUCT_PURCHASE graph and return (new_state, reply)."""
 
-    graph_input: ProductPurchaseGraphState = {**state, "incoming_message": message_text, "reply": ""}
+    graph_input: ProductPurchaseGraphState = {
+        **state,
+        "incoming_message": message_text,
+        "reply": "",
+        "budget_unknown": False,
+    }
     result = _PRODUCT_PURCHASE_GRAPH.invoke(graph_input)
 
     new_state: SalesState = {field: result[field] for field in SALES_STATE_FIELDS}

@@ -6,12 +6,15 @@ never read from here, only from PostgreSQL (ARCHITECTURE.md §15).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import faiss
 from django.conf import settings
 
 from providers.embeddings import get_embedding_provider
+
+logger = logging.getLogger(__name__)
 
 _cached_index = None
 _cached_key: tuple[str, float] | None = None
@@ -46,6 +49,19 @@ def semantic_search(query: str, top_k: int = 20) -> list[int] | None:
 
     provider = get_embedding_provider()
     vector = provider.embed([query])
+
+    if vector.shape[1] != index.d:
+        # The index was built with a different embedding provider/dimension
+        # (e.g. OPENAI_API_KEY was added/changed since the last reindex) —
+        # fall back rather than 500ing the whole conversation turn.
+        logger.warning(
+            "FAISS index dimension (%d) doesn't match the current embedding provider's (%d). "
+            "Run manage.py reindex_products. Falling back to the non-semantic search.",
+            index.d,
+            vector.shape[1],
+        )
+        return None
+
     _distances, ids = index.search(vector, min(top_k, index.ntotal))
 
     return [int(product_id) for product_id in ids[0] if product_id != -1]

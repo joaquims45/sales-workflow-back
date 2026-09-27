@@ -26,18 +26,37 @@ from .decision_model import AlwaysContinueDecisionModel, DecisionModel, RoutingR
 
 logger = logging.getLogger(__name__)
 
+# What each active_node is actually asking for — without this, "2 millones"
+# or a bare place name look ambiguous to a generic classifier. With it,
+# they're obviously a direct answer to the question just asked.
+_NODE_EXPECTATIONS = {
+    None: "The conversation just started; nothing has been asked yet.",
+    "DISCOVERY": "Gathering what the customer wants and their budget. A short answer "
+    "(a product type, a number, \"no sé\", etc.) is almost always answering that.",
+    "PRODUCT_SEARCH": "Looking up matching products — no question pending.",
+    "RECOMMENDATION": "Just showed product options; a short reply likely reacts to them.",
+    "CHECKOUT": "Finalizing the purchase.",
+    "EXTRACT_DESTINATION": "Just asked which city/town to quote shipping for. A bare place "
+    "name (\"Chivilcoy\", \"Santa Fe\") is that answer, not a new topic.",
+}
+
 _ROUTING_CRITERIA = {
     RoutingDecision.CONTINUE: (
-        "The message continues providing information the active workflow/node asked for, "
-        "or otherwise moves the current goal forward."
+        "The message answers or moves forward whatever the active node is currently asking "
+        "(see active_node's expectation below) — this is the default for short or ambiguous "
+        "messages when nothing clearly signals otherwise, and it is also correct when there is "
+        "no active workflow yet (e.g. a greeting that starts the conversation)."
     ),
     RoutingDecision.SIDE_QUERY: (
-        "The message asks about something unrelated to the active node (shipping, warranty, "
-        "store hours, etc.) without abandoning the current goal — it expects a quick answer "
-        "before returning to what it was doing."
+        "The message explicitly asks about a different, recognizable topic (shipping, warranty, "
+        "store hours, etc.) than what the active node is asking, without abandoning the current "
+        "goal — it expects a quick answer before returning to what it was doing. Do not choose "
+        "this just because a message is short or a bare answer (a place name, a number)."
     ),
     RoutingDecision.REPLACE: (
-        "The message abandons the current goal entirely and starts pursuing a different one."
+        "The message explicitly abandons the current goal and states a different one "
+        "(e.g. \"olvidate de eso, mejor quiero...\"). Do not choose this for a plain answer to "
+        "the current question."
     ),
 }
 
@@ -50,13 +69,17 @@ class JevDecisionModel:
         self._fallback = AlwaysContinueDecisionModel()
 
     def decide(self, message_text: str, state: SalesState) -> RoutingResult:
+        active_node = state["active_node"]
         try:
             response = self._client.system_one(
                 state={
                     "message": message_text,
                     "primary_goal": state["primary_goal"],
                     "active_workflow": state["active_workflow"],
-                    "active_node": state["active_node"],
+                    "active_node": active_node,
+                    "what_active_node_is_asking": _NODE_EXPECTATIONS.get(
+                        active_node, "Continuing the active workflow."
+                    ),
                 },
                 questions={
                     "routing": Choice(

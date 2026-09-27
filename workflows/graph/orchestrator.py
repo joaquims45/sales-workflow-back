@@ -23,20 +23,33 @@ logger = logging.getLogger(__name__)
 
 
 def run_side_query(state: SalesState, message_text: str) -> tuple[SalesState, str]:
-    previous_workflow = state["active_workflow"]
-    previous_node = state["active_node"]
+    # If we're already mid a SHIPPING_QUERY (it asked for a destination and
+    # got none last turn), this message answers that — don't push another
+    # frame onto the stack, just re-run shipping with the new message.
+    already_pending = state["interruption"] == "SHIPPING_QUERY"
 
-    if previous_workflow is not None:
-        state["workflow_stack"] = state["workflow_stack"] + [
-            {"workflow": previous_workflow, "node": previous_node}
-        ]
-    state["suspended_workflow"] = previous_workflow
-    state["suspended_node"] = previous_node
-    state["interruption"] = "SHIPPING_QUERY"
-    state["active_workflow"] = "SHIPPING_QUERY"
-    state["active_node"] = "EXTRACT_DESTINATION"
+    if not already_pending:
+        previous_workflow = state["active_workflow"]
+        previous_node = state["active_node"]
 
-    reply = run_shipping_query(message_text)
+        if previous_workflow is not None:
+            state["workflow_stack"] = state["workflow_stack"] + [
+                {"workflow": previous_workflow, "node": previous_node}
+            ]
+        state["suspended_workflow"] = previous_workflow
+        state["suspended_node"] = previous_node
+        state["interruption"] = "SHIPPING_QUERY"
+        state["active_workflow"] = "SHIPPING_QUERY"
+        state["active_node"] = "EXTRACT_DESTINATION"
+
+    reply, resolved = run_shipping_query(message_text)
+
+    if not resolved:
+        # Still no usable destination — stay suspended so the next message
+        # comes straight back here instead of being routed from scratch.
+        state["routing_decision"] = RoutingDecision.SIDE_QUERY
+        state["routing_confidence"] = 1.0
+        return state, reply
 
     if state["workflow_stack"]:
         frame = state["workflow_stack"][-1]

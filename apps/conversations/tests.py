@@ -248,3 +248,24 @@ class ConversationScenarioTests(APITestCase):
         self.assertTrue(
             WorkflowEvent.objects.filter(conversation=conversation, event_type="workflow.replaced").exists()
         )
+
+    def test_shipping_follow_up_answers_the_pending_question_without_re_routing(self):
+        # Regression: "¿Hacen envíos?" (no destination) asks for one; the
+        # follow-up used to be routed from scratch instead of answering it.
+        conversation = Conversation.objects.create()
+
+        first_response = self._post_message(conversation, "¿Hacen envíos?")
+
+        self.assertEqual(first_response.data["sales_state"]["interruption"], "SHIPPING_QUERY")
+        self.assertIn("¿A qué localidad", first_response.data["messages"][1]["content"])
+
+        second_response = self._post_message(conversation, "Santa Fe")
+
+        self.assertIsNone(second_response.data["sales_state"]["interruption"])
+        self.assertIn("Santa Fe", second_response.data["messages"][1]["content"])
+
+        # The follow-up must not have gone through Jev/routing again — it's
+        # the answer to a pending question, not a new message to classify.
+        event_types = list(conversation.events.order_by("created_at").values_list("event_type", flat=True))
+        self.assertEqual(event_types.count("jev.decision"), 1)
+        self.assertEqual(event_types.count("routing.completed"), 1)
