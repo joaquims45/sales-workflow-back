@@ -8,7 +8,7 @@ from rest_framework.test import APITestCase
 from apps.analytics.models import WorkflowEvent
 from apps.catalog.models import Category, Product
 from apps.orders.models import Order
-from apps.payments.models import Payment
+from apps.payments.models import Checkout, Payment
 
 from .models import Conversation, Message
 
@@ -103,6 +103,45 @@ class ConversationAPITests(APITestCase):
 
         processed_event = response.data[-1]
         self.assertIn("latency_ms", processed_event["payload"])
+
+    def test_checkout_endpoint_returns_nulls_before_any_order_exists(self):
+        conversation = Conversation.objects.create()
+
+        url = reverse("conversation-checkout", args=[conversation.pk])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {"order": None, "payment_status": None, "checkout_url": None, "provider": None},
+        )
+
+    def test_checkout_endpoint_reflects_the_created_order_and_payment(self):
+        category = Category.objects.create(name="Notebooks", slug="notebooks")
+        product = Product.objects.create(
+            category=category,
+            name="ASUS TUF Gaming A15",
+            slug="asus-tuf-gaming-a15",
+            description="Notebook gamer.",
+            price="1400000.00",
+            stock=5,
+        )
+        order = Order.objects.create(conversation=Conversation.objects.create(), total=product.price)
+        conversation = order.conversation
+
+        checkout = Checkout.objects.create(
+            order=order, provider="mock", external_reference="abc-123", checkout_url="/mock-checkout/abc-123/"
+        )
+        Payment.objects.create(checkout=checkout, amount=order.total, status=Payment.Status.PENDING)
+
+        url = reverse("conversation-checkout", args=[conversation.pk])
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["order"]["id"], order.id)
+        self.assertEqual(response.data["payment_status"], Payment.Status.PENDING)
+        self.assertEqual(response.data["checkout_url"], "/mock-checkout/abc-123/")
+        self.assertEqual(response.data["provider"], "mock")
 
 
 class ConversationScenarioTests(APITestCase):

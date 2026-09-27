@@ -3,9 +3,16 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.analytics.models import WorkflowEvent
+from apps.orders.models import Order
 
 from .models import Conversation, Message
-from .serializers import ConversationSerializer, MessageSerializer, PostMessageSerializer, WorkflowEventSerializer
+from .serializers import (
+    CheckoutStatusSerializer,
+    ConversationSerializer,
+    MessageSerializer,
+    PostMessageSerializer,
+    WorkflowEventSerializer,
+)
 from .services import advance_conversation, get_or_create_state
 
 
@@ -58,3 +65,23 @@ class ConversationViewSet(
         conversation = self.get_object()
         events = WorkflowEvent.objects.filter(conversation=conversation).order_by("created_at")
         return Response(WorkflowEventSerializer(events, many=True).data)
+
+    @action(detail=True, methods=["get"], url_path="checkout")
+    def checkout(self, request, pk=None):
+        conversation = self.get_object()
+        order = Order.objects.filter(conversation=conversation).order_by("-created_at").first()
+
+        if order is None:
+            payload = {"order": None, "payment_status": None, "checkout_url": None, "provider": None}
+            return Response(CheckoutStatusSerializer(payload).data)
+
+        checkout = order.checkouts.order_by("-created_at").first()
+        payment = checkout.payments.order_by("-created_at").first() if checkout else None
+
+        payload = {
+            "order": order,
+            "payment_status": payment.status if payment else None,
+            "checkout_url": checkout.checkout_url if checkout else None,
+            "provider": checkout.provider if checkout else None,
+        }
+        return Response(CheckoutStatusSerializer(payload).data)
