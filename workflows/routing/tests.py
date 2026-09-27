@@ -49,6 +49,15 @@ class RouteMessageTests(SimpleTestCase):
         self.assertEqual(state["routing_decision"], "SIDE_QUERY")
         self.assertEqual(state["routing_confidence"], 0.7)
 
+    def test_chitchat_keyword_overrides_fallback_to_chitchat(self):
+        state = build_initial_state(conversation_id=1)
+        state["primary_goal"] = "BUY_PRODUCT"
+
+        state, _raw_decision, _decide_latency_ms = route_message(state, "Genial, muchas gracias!")
+
+        self.assertEqual(state["routing_decision"], "CHITCHAT")
+        self.assertEqual(state["routing_confidence"], 0.7)
+
 
 class _FakeTypeSafeClient:
     """Duck-typed stand-in for TypeSafeClient — no real API calls."""
@@ -130,6 +139,21 @@ class MatchKnownIntentKeywordsTests(SimpleTestCase):
 
     def test_returns_none_when_no_keyword_matches(self):
         self.assertIsNone(match_known_intent_keywords("Quiero la notebook ASUS."))
+
+    def test_matches_chitchat_keyword(self):
+        self.assertEqual(match_known_intent_keywords("Genial muchas gracias!"), "CHITCHAT")
+
+    def test_bare_hola_matches_chitchat_keyword(self):
+        self.assertEqual(match_known_intent_keywords("hola"), "CHITCHAT")
+
+    def test_replace_keyword_takes_priority_over_chitchat(self):
+        result = match_known_intent_keywords("Hola, mejor busco un monitor.")
+        self.assertEqual(result, "REPLACE")
+
+    def test_purchase_confirmation_not_misclassified_as_chitchat(self):
+        # "perfecto"/"genial" alone are how customers confirm a
+        # recommendation or close a purchase — must stay unmatched.
+        self.assertIsNone(match_known_intent_keywords("Perfecto, el primero."))
 
 
 class _FixedDecisionModel:

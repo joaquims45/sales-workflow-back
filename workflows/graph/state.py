@@ -61,6 +61,7 @@ class RoutingDecision:
     CONTINUE = "CONTINUE"
     SIDE_QUERY = "SIDE_QUERY"
     REPLACE = "REPLACE"
+    CHITCHAT = "CHITCHAT"
     RESUME = "RESUME"
 
 

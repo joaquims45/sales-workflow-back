@@ -44,8 +44,16 @@ _ROUTING_CRITERIA = {
     RoutingDecision.CONTINUE: (
         "The message answers or moves forward whatever the active node is currently asking "
         "(see active_node's expectation below) — this is the default for short or ambiguous "
-        "messages when nothing clearly signals otherwise, and it is also correct when there is "
-        "no active workflow yet (e.g. a greeting that starts the conversation)."
+        "messages when nothing clearly signals otherwise. Also correct for a greeting at the "
+        "very start of the conversation (primary_goal is null) — that is never CHITCHAT."
+    ),
+    RoutingDecision.CHITCHAT: (
+        "The message is a greeting, thanks, acknowledgment, or farewell (e.g. \"hola\", "
+        "\"gracias\", \"genial gracias\", \"chau\") that does not answer what the active node is "
+        "currently asking and does not raise a new topic or abandon the goal — it's purely "
+        "conversational. IMPORTANT: only valid when primary_goal is not null (a goal is already "
+        "in progress or completed). If primary_goal is null, a greeting like \"hola\" is the "
+        "conversation just starting — choose CONTINUE instead, never CHITCHAT."
     ),
     RoutingDecision.SIDE_QUERY: (
         "The message explicitly asks about a different, recognizable topic (shipping, warranty, "

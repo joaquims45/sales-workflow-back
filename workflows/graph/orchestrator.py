@@ -1,5 +1,6 @@
-"""Acts on SIDE_QUERY (suspend/resume) and REPLACE (close/restart goal)
-decisions from the router (ARCHITECTURE.md §8-10).
+"""Acts on SIDE_QUERY (suspend/resume), REPLACE (close/restart goal), and
+CHITCHAT (conversational aside, no state change) decisions from the router
+(ARCHITECTURE.md §8-10).
 
 Only SHIPPING_QUERY exists today, so run_side_query dispatches to it
 directly — a real dispatcher (picking among multiple side workflows from
@@ -18,7 +19,9 @@ import time
 
 from apps.conversations.models import Conversation
 from events.bus import emit_event
+from providers.reply import generate_reply
 
+from .instrumentation import instrument
 from .product_purchase import run_product_purchase
 from .shipping_query import run_shipping_query
 from .state import RoutingDecision, SalesState, build_initial_state
@@ -115,3 +118,35 @@ def run_replace(state: SalesState, message_text: str) -> tuple[SalesState, str]:
     fresh_state["routing_confidence"] = replaced_confidence
 
     return run_product_purchase(fresh_state, message_text)
+
+
+def run_chitchat(state: SalesState, message_text: str) -> tuple[SalesState, str]:
+    """Replies to a conversational aside (greeting/thanks/farewell) without
+    touching any workflow state — no node re-entry, no side effects. Unlike
+    every CONTINUE message, this never re-enters discovery_node, so it can't
+    accidentally re-trigger checkout_node after a purchase is already done.
+
+    Guarded by advance_conversation: only reached when primary_goal is
+    already set (see RoutingDecision.CHITCHAT's own routing criteria).
+    """
+
+    def _generate() -> str:
+        return generate_reply(
+            situation=(
+                "The customer sent a conversational aside (greeting, thanks, or farewell) — "
+                "not a question or a new request. Reply briefly and naturally; if a purchase "
+                "goal is already in progress or was just completed, you may warmly invite them "
+                "to continue."
+            ),
+            facts={
+                "primary_goal": state["primary_goal"],
+                "active_node": state["active_node"],
+                "checkout_ready": state["checkout_ready"],
+            },
+            fallback="¡De nada! Cualquier cosa que necesites, decime.",
+        )
+
+    reply = instrument(state["conversation_id"], "CHITCHAT", "CHITCHAT", _generate)
+
+    state["routing_decision"] = RoutingDecision.CHITCHAT
+    return state, reply

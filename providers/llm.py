@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_VALID_DECISIONS = {"CONTINUE", "SIDE_QUERY", "REPLACE"}
+_VALID_DECISIONS = {"CONTINUE", "SIDE_QUERY", "REPLACE", "CHITCHAT"}
 
 # What each active_node is actually asking for — without this, a bare
 # number or place name looks ambiguous to the model. With it, it's an
@@ -42,7 +42,8 @@ _PROMPT_TEMPLATE = """You are the router for a conversational sales workflow, ca
 Jev's own classification was too uncertain to trust. Given the customer's new message and the \
 conversation's current state, decide how to route it.
 
-Respond with only a JSON object: {{"decision": "CONTINUE"|"SIDE_QUERY"|"REPLACE", "confidence": <0..1>}}.
+Respond with only a JSON object: \
+{{"decision": "CONTINUE"|"SIDE_QUERY"|"REPLACE"|"CHITCHAT", "confidence": <0..1>}}.
 
 Default to CONTINUE. Short or ambiguous messages (a number, a place name, "no sé", a one-word \
 answer) are CONTINUE unless the message clearly, explicitly signals otherwise — never guess \
@@ -55,6 +56,10 @@ greeting that starts the conversation).
 warranty, store hours, etc.) than what's being asked, without abandoning the current goal.
 - REPLACE: the message explicitly abandons the current goal and states a different one \
 (e.g. "olvidate de eso, mejor quiero..."). Never for a plain answer to the current question.
+- CHITCHAT: the message is a greeting, thanks, acknowledgment, or farewell that doesn't answer \
+active_node's question and doesn't raise a new topic — purely conversational filler. ONLY valid \
+when primary_goal is not null; if primary_goal is null, a greeting is the conversation starting \
+and must be CONTINUE, never CHITCHAT.
 
 Examples:
 - active_node=null, message="hola" -> CONTINUE (just a greeting, nothing to interrupt or replace)
@@ -65,6 +70,10 @@ question)
 recognizable shipping question)
 - active_node="RECOMMENDATION", message="olvidate, mejor quiero un monitor" -> REPLACE (explicit \
 goal change)
+- primary_goal="BUY_PRODUCT", active_node="CHECKOUT", message="genial muchas gracias" -> CHITCHAT \
+(thanks after checkout is already in progress/complete, not answering or changing anything)
+- primary_goal="BUY_PRODUCT", active_node="RECOMMENDATION", message="hola" -> CHITCHAT (a stray \
+greeting mid-goal, not a new topic and not answering the recommendation)
 
 primary_goal: {primary_goal}
 active_workflow: {active_workflow}

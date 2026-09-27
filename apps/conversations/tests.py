@@ -284,3 +284,35 @@ class ConversationScenarioTests(APITestCase):
         event_types = list(conversation.events.order_by("created_at").values_list("event_type", flat=True))
         self.assertEqual(event_types.count("jev.decision"), 1)
         self.assertEqual(event_types.count("routing.completed"), 1)
+
+    def test_chitchat_after_checkout_does_not_duplicate_order(self):
+        # Regression: "Genial muchas gracias" after a completed purchase
+        # used to re-enter discovery_node (every CONTINUE message does) and
+        # could land back on checkout_node, creating a second Order/Payment
+        # for a simple thank-you.
+        conversation = Conversation.objects.create()
+
+        self._post_message(conversation, "Busco una notebook gamer.")
+        self._post_message(conversation, "Tengo hasta $1.500.000.")
+        purchase_response = self._post_message(conversation, "Perfecto, quiero comprarla.")
+
+        state_before = purchase_response.data["sales_state"]
+        self.assertTrue(state_before["checkout_ready"])
+        orders_before = Order.objects.count()
+
+        thanks_response = self._post_message(conversation, "Genial muchas gracias")
+
+        state_after = thanks_response.data["sales_state"]
+        self.assertEqual(state_after["routing_decision"], "CHITCHAT")
+        self.assertEqual(Order.objects.count(), orders_before)
+        self.assertEqual(state_after["active_node"], state_before["active_node"])
+        self.assertEqual(state_after["checkout_ready"], state_before["checkout_ready"])
+        self.assertEqual(state_after["selected_product_id"], state_before["selected_product_id"])
+
+    def test_hola_as_first_message_still_continues_to_discovery(self):
+        conversation = Conversation.objects.create()
+
+        response = self._post_message(conversation, "hola")
+
+        self.assertEqual(response.data["sales_state"]["routing_decision"], "CONTINUE")
+        self.assertEqual(response.data["sales_state"]["active_workflow"], "PRODUCT_PURCHASE")

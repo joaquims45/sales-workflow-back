@@ -11,7 +11,7 @@ from apps.orders.models import Order
 from apps.payments.models import Payment
 
 from .extraction import extract_budget, extract_needs
-from .orchestrator import run_replace, run_side_query
+from .orchestrator import run_chitchat, run_replace, run_side_query
 from .product_purchase import run_product_purchase
 from .shipping_query import run_shipping_query
 from .state import FunnelStage, build_initial_state
@@ -395,3 +395,51 @@ class RunReplaceTests(TestCase):
         self.assertEqual(new_state["primary_goal"], "BUY_PRODUCT")
         self.assertEqual(new_state["active_workflow"], "PRODUCT_PURCHASE")
         self.assertTrue(reply)
+
+
+class RunChitchatTests(TestCase):
+    def test_does_not_mutate_workflow_state(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["primary_goal"] = "BUY_PRODUCT"
+        state["active_workflow"] = "PRODUCT_PURCHASE"
+        state["active_node"] = "CHECKOUT"
+        state["checkout_ready"] = True
+        state["selected_product_id"] = 5
+        state["candidate_products"] = [5, 6]
+
+        new_state, reply = run_chitchat(state, "Genial muchas gracias")
+
+        self.assertEqual(new_state["routing_decision"], "CHITCHAT")
+        self.assertEqual(new_state["active_workflow"], "PRODUCT_PURCHASE")
+        self.assertEqual(new_state["active_node"], "CHECKOUT")
+        self.assertTrue(new_state["checkout_ready"])
+        self.assertEqual(new_state["selected_product_id"], 5)
+        self.assertEqual(new_state["candidate_products"], [5, 6])
+        self.assertTrue(reply)
+
+    def test_returns_fallback_reply_without_openai_key(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["primary_goal"] = "BUY_PRODUCT"
+
+        _new_state, reply = run_chitchat(state, "gracias")
+
+        self.assertEqual(reply, "¡De nada! Cualquier cosa que necesites, decime.")
+
+    def test_emits_node_events(self):
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["primary_goal"] = "BUY_PRODUCT"
+
+        run_chitchat(state, "gracias")
+
+        node_events = [
+            (event_type, payload["node"])
+            for event_type, payload in conversation.events.order_by("created_at").values_list(
+                "event_type", "payload"
+            )
+            if event_type in ("node.started", "node.completed")
+        ]
+        self.assertIn(("node.started", "CHITCHAT"), node_events)
+        self.assertIn(("node.completed", "CHITCHAT"), node_events)

@@ -1,12 +1,15 @@
+import logging
 import time
 
 from events.bus import emit_event
-from workflows.graph.orchestrator import run_replace, run_side_query
+from workflows.graph.orchestrator import run_chitchat, run_replace, run_side_query
 from workflows.graph.product_purchase import run_product_purchase
 from workflows.graph.state import RoutingDecision, SalesState, build_initial_state
 from workflows.routing.router import route_message
 
 from .models import Conversation, SalesStateSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 def get_or_create_state(conversation: Conversation) -> SalesState:
@@ -64,8 +67,17 @@ def advance_conversation(conversation: Conversation, message_text: str) -> tuple
             {"decision": state["routing_decision"], "confidence": state["routing_confidence"]},
         )
 
+        if state["routing_decision"] == RoutingDecision.CHITCHAT and state["primary_goal"] is None:
+            # A greeting is the conversation starting, not an aside to
+            # brush off — never CHITCHAT before a goal even exists,
+            # regardless of what the model/heuristic decided.
+            logger.info("Downgrading CHITCHAT to CONTINUE: no primary_goal yet.")
+            state["routing_decision"] = RoutingDecision.CONTINUE
+
         if state["routing_decision"] == RoutingDecision.SIDE_QUERY:
             new_state, reply = _run_side_query_turn(conversation, state, message_text)
+        elif state["routing_decision"] == RoutingDecision.CHITCHAT:
+            new_state, reply = run_chitchat(state, message_text)
         elif state["routing_decision"] == RoutingDecision.REPLACE:
             emit_event(
                 conversation,
