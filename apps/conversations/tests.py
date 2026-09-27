@@ -41,6 +41,8 @@ class ConversationAPITests(APITestCase):
         self.assertIn("gaming", state["customer_needs"])
         self.assertIn("programming", state["customer_needs"])
         self.assertEqual(state["funnel_stage"], "CONSIDERATION")
+        self.assertEqual(state["routing_decision"], "CONTINUE")
+        self.assertEqual(state["routing_confidence"], 1.0)
 
     def test_state_endpoint_returns_current_snapshot(self):
         conversation = Conversation.objects.create()
