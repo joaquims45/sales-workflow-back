@@ -26,7 +26,7 @@ class RouteMessageTests(SimpleTestCase):
     def test_records_routing_decision_and_confidence_on_state(self):
         state = build_initial_state(conversation_id=1)
 
-        state, _raw_decision = route_message(state, "Busco una notebook gamer.")
+        state, _raw_decision, _decide_latency_ms = route_message(state, "Busco una notebook gamer.")
 
         # No Jev configured -> medium-confidence CONTINUE, no shipping
         # keyword to override it via the heuristic.
@@ -36,7 +36,7 @@ class RouteMessageTests(SimpleTestCase):
     def test_replace_keyword_overrides_fallback_to_replace(self):
         state = build_initial_state(conversation_id=1)
 
-        state, _raw_decision = route_message(state, "Olvidate de la notebook. Quiero buscar un monitor.")
+        state, _raw_decision, _decide_latency_ms = route_message(state, "Olvidate de la notebook. Quiero buscar un monitor.")
 
         self.assertEqual(state["routing_decision"], "REPLACE")
         self.assertEqual(state["routing_confidence"], 0.7)
@@ -44,7 +44,7 @@ class RouteMessageTests(SimpleTestCase):
     def test_shipping_keyword_overrides_fallback_to_side_query(self):
         state = build_initial_state(conversation_id=1)
 
-        state, _raw_decision = route_message(state, "¿Hacen envíos a Santa Fe?")
+        state, _raw_decision, _decide_latency_ms = route_message(state, "¿Hacen envíos a Santa Fe?")
 
         self.assertEqual(state["routing_decision"], "SIDE_QUERY")
         self.assertEqual(state["routing_confidence"], 0.7)
@@ -145,7 +145,7 @@ class RouteMessageConfidenceTests(SimpleTestCase):
         state = build_initial_state(conversation_id=1)
         model = _FixedDecisionModel("REPLACE", 0.99)
 
-        state, _raw_decision = route_message(state, "Olvidate de la notebook, quiero un monitor.", decision_model=model)
+        state, _raw_decision, _decide_latency_ms = route_message(state, "Olvidate de la notebook, quiero un monitor.", decision_model=model)
 
         self.assertEqual(state["routing_decision"], "REPLACE")
         self.assertEqual(state["routing_confidence"], 0.99)
@@ -154,7 +154,7 @@ class RouteMessageConfidenceTests(SimpleTestCase):
         state = build_initial_state(conversation_id=1)
         model = _FixedDecisionModel("CONTINUE", 0.7)
 
-        state, _raw_decision = route_message(state, "¿Hacen envíos a Santa Fe?", decision_model=model)
+        state, _raw_decision, _decide_latency_ms = route_message(state, "¿Hacen envíos a Santa Fe?", decision_model=model)
 
         self.assertEqual(state["routing_decision"], "SIDE_QUERY")
         self.assertEqual(state["routing_confidence"], 0.7)
@@ -165,7 +165,7 @@ class RouteMessageConfidenceTests(SimpleTestCase):
 
         with mock.patch("workflows.routing.router.get_routing_llm_provider") as get_provider:
             get_provider.return_value.decide_routing.return_value = None
-            state, _raw_decision = route_message(state, "Quiero la notebook ASUS.", decision_model=model)
+            state, _raw_decision, _decide_latency_ms = route_message(state, "Quiero la notebook ASUS.", decision_model=model)
 
         self.assertEqual(state["routing_decision"], "SIDE_QUERY")
         self.assertEqual(state["routing_confidence"], 0.7)
@@ -179,7 +179,7 @@ class RouteMessageConfidenceTests(SimpleTestCase):
                 "decision": "REPLACE",
                 "confidence": 0.9,
             }
-            state, _raw_decision = route_message(state, "mensaje ambiguo", decision_model=model)
+            state, _raw_decision, _decide_latency_ms = route_message(state, "mensaje ambiguo", decision_model=model)
 
         self.assertEqual(state["routing_decision"], "REPLACE")
         self.assertEqual(state["routing_confidence"], 0.9)
@@ -188,7 +188,7 @@ class RouteMessageConfidenceTests(SimpleTestCase):
         state = build_initial_state(conversation_id=1)
         model = _FixedDecisionModel("CONTINUE", 0.2)
 
-        state, _raw_decision = route_message(state, "mensaje ambiguo", decision_model=model)
+        state, _raw_decision, _decide_latency_ms = route_message(state, "mensaje ambiguo", decision_model=model)
 
         self.assertEqual(state["routing_decision"], "CONTINUE")
         self.assertEqual(state["routing_confidence"], 0.2)

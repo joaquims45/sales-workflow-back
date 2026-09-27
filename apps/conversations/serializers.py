@@ -1,6 +1,14 @@
 from rest_framework import serializers
 
+from apps.analytics.models import WorkflowEvent
+
 from .models import Conversation, Message
+
+
+class WorkflowEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WorkflowEvent
+        fields = ["id", "event_type", "payload", "created_at"]
 
 
 class MessageSerializer(serializers.ModelSerializer):

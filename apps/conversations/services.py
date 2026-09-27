@@ -1,3 +1,5 @@
+import time
+
 from events.bus import emit_event
 from workflows.graph.orchestrator import run_replace, run_side_query
 from workflows.graph.product_purchase import run_product_purchase
@@ -17,13 +19,16 @@ def get_or_create_state(conversation: Conversation) -> SalesState:
 
 def advance_conversation(conversation: Conversation, message_text: str) -> tuple[SalesState, str]:
     """Run one turn of the sales workflow, persist the resulting state, and
-    emit the WorkflowEvents that turn produced (ARCHITECTURE.md §20)."""
+    emit the WorkflowEvents that turn produced (ARCHITECTURE.md §20/§21)."""
+
+    turn_started_at = time.perf_counter()
+    emit_event(conversation, "message.received", {"content": message_text})
 
     state = get_or_create_state(conversation)
     was_active_before = state["active_workflow"] is not None
 
-    state, raw_decision = route_message(state, message_text)
-    emit_event(conversation, "jev.decision", raw_decision)
+    state, raw_decision, decide_latency_ms = route_message(state, message_text)
+    emit_event(conversation, "jev.decision", {**raw_decision, "latency_ms": round(decide_latency_ms, 2)})
     emit_event(
         conversation,
         "routing.completed",
@@ -59,4 +64,8 @@ def advance_conversation(conversation: Conversation, message_text: str) -> tuple
             emit_event(conversation, "workflow.started", {"workflow": new_state["active_workflow"]})
 
     SalesStateSnapshot.objects.filter(conversation=conversation).update(state=new_state)
+
+    turn_latency_ms = (time.perf_counter() - turn_started_at) * 1000
+    emit_event(conversation, "message.processed", {"latency_ms": round(turn_latency_ms, 2)})
+
     return new_state, reply

@@ -14,6 +14,7 @@ workflows/graph/orchestrator.py.
 from __future__ import annotations
 
 import logging
+import time
 
 from django.conf import settings
 
@@ -28,19 +29,27 @@ logger = logging.getLogger(__name__)
 
 def route_message(
     state: SalesState, message_text: str, decision_model: DecisionModel | None = None
-) -> tuple[SalesState, RoutingResult]:
-    """Returns (state, raw_decision) — raw_decision is Jev's call before
-    thresholds/heuristics/escalation, so callers can emit `jev.decision`
-    separately from the final `routing.completed` (ARCHITECTURE.md §20)."""
+) -> tuple[SalesState, RoutingResult, float]:
+    """Returns (state, raw_decision, decide_latency_ms).
+
+    raw_decision is Jev's call before thresholds/heuristics/escalation, and
+    decide_latency_ms is how long that call took — both are for the caller
+    to attach to a `jev.decision` trace event (ARCHITECTURE.md §20/§21),
+    kept separate from the final `routing.completed` decision.
+    """
 
     model = decision_model or get_decision_model()
+
+    started_at = time.perf_counter()
     raw_result = model.decide(message_text, state)
+    decide_latency_ms = (time.perf_counter() - started_at) * 1000
+
     final_result = _resolve_with_confidence(message_text, state, raw_result)
 
     state["routing_decision"] = final_result["decision"]
     state["routing_confidence"] = final_result["confidence"]
 
-    return state, raw_result
+    return state, raw_result, decide_latency_ms
 
 
 def _resolve_with_confidence(message_text: str, state: SalesState, result: RoutingResult) -> RoutingResult:

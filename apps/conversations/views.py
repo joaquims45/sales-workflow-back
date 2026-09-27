@@ -2,8 +2,10 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from apps.analytics.models import WorkflowEvent
+
 from .models import Conversation, Message
-from .serializers import ConversationSerializer, MessageSerializer, PostMessageSerializer
+from .serializers import ConversationSerializer, MessageSerializer, PostMessageSerializer, WorkflowEventSerializer
 from .services import advance_conversation, get_or_create_state
 
 
@@ -28,9 +30,8 @@ class ConversationViewSet(
             conversation=conversation, role=Message.Role.USER, content=content
         )
 
-        # Runs the PRODUCT_PURCHASE graph (DISCOVERY -> PRODUCT_SEARCH ->
-        # RECOMMENDATION). No routing/Jev yet — every message re-enters at
-        # DISCOVERY (see workflows/graph/product_purchase.py).
+        # Routes the message (CONTINUE/SIDE_QUERY/REPLACE) and runs whichever
+        # workflow that decision calls for (see apps/conversations/services.py).
         state, reply = advance_conversation(conversation, content)
 
         assistant_message = Message.objects.create(
@@ -51,3 +52,9 @@ class ConversationViewSet(
     def state(self, request, pk=None):
         conversation = self.get_object()
         return Response(get_or_create_state(conversation))
+
+    @action(detail=True, methods=["get"], url_path="trace")
+    def trace(self, request, pk=None):
+        conversation = self.get_object()
+        events = WorkflowEvent.objects.filter(conversation=conversation).order_by("created_at")
+        return Response(WorkflowEventSerializer(events, many=True).data)
