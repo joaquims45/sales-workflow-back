@@ -152,3 +152,10 @@ FAISS_INDEX_PATH = env('FAISS_INDEX_PATH', default=str(BASE_DIR / 'data' / 'fais
 # (see workflows/routing/jev_router.py).
 
 TYPESAFE_API_KEY = env('TYPESAFE_API_KEY', default='')
+
+# Confidence thresholds for the routing decision (ARCHITECTURE.md §12).
+# >= HIGH: trust Jev's decision as-is.
+# [LOW, HIGH): try a deterministic keyword check before escalating.
+# < LOW: escalate to an LLM (falls back to Jev's own call if none is configured).
+JEV_CONFIDENCE_HIGH = env.float('JEV_CONFIDENCE_HIGH', default=0.85)
+JEV_CONFIDENCE_LOW = env.float('JEV_CONFIDENCE_LOW', default=0.6)

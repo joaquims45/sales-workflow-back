@@ -1,7 +1,10 @@
 import numpy as np
 from django.test import SimpleTestCase
 
+from workflows.graph.state import build_initial_state
+
 from .embeddings import HashingEmbeddingProvider
+from .llm import NullRoutingLLMProvider, get_routing_llm_provider
 
 
 class HashingEmbeddingProviderTests(SimpleTestCase):
@@ -24,3 +27,18 @@ class HashingEmbeddingProviderTests(SimpleTestCase):
 
         norm = np.linalg.norm(vectors[0])
         self.assertAlmostEqual(norm, 1.0, places=5)
+
+
+class NullRoutingLLMProviderTests(SimpleTestCase):
+    def test_returns_none_signaling_no_escalation(self):
+        provider = NullRoutingLLMProvider()
+        state = build_initial_state(conversation_id=1)
+
+        result = provider.decide_routing("¿Hacen envíos a Santa Fe?", state)
+
+        self.assertIsNone(result)
+
+
+class GetRoutingLLMProviderTests(SimpleTestCase):
+    def test_returns_null_provider_by_default(self):
+        self.assertIsInstance(get_routing_llm_provider(), NullRoutingLLMProvider)
