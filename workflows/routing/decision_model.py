@@ -6,10 +6,13 @@ Jev directly. `get_decision_model()` resolves to the real Jev integration
 to `AlwaysContinueDecisionModel` otherwise — the same resolver pattern used
 for `PaymentProvider` (mock by default, real provider behind config).
 
-`AlwaysContinueDecisionModel` always returning CONTINUE is intentional, not
-a shortcut: SIDE_QUERY and REPLACE have no workflow to act on yet
-(that lands in M7/M8), so always continuing is the correct behavior for a
-project that hasn't configured Jev.
+`AlwaysContinueDecisionModel` defaults to CONTINUE at *medium* confidence
+(deliberately below JEV_CONFIDENCE_HIGH) rather than full certainty: the
+router's confidence-threshold logic (workflows/routing/router.py) then still
+runs the deterministic keyword heuristic on every message, so known side
+queries (shipping today) keep working even with zero external credentials.
+Only genuinely ambiguous messages fall through to LLM escalation, which is a
+no-op by default (see providers/llm.py) and keeps CONTINUE.
 """
 
 from __future__ import annotations
@@ -17,6 +20,10 @@ from __future__ import annotations
 from typing import Protocol, TypedDict
 
 from workflows.graph.state import RoutingDecision, SalesState
+
+# Deliberately inside [JEV_CONFIDENCE_LOW, JEV_CONFIDENCE_HIGH) — see module
+# docstring. Not calibrated; there is no model behind this fallback.
+FALLBACK_CONFIDENCE = 0.7
 
 
 class RoutingResult(TypedDict):
@@ -32,7 +39,7 @@ class AlwaysContinueDecisionModel:
     """Fallback decision model used when Jev isn't configured."""
 
     def decide(self, message_text: str, state: SalesState) -> RoutingResult:
-        return {"decision": RoutingDecision.CONTINUE, "confidence": 1.0}
+        return {"decision": RoutingDecision.CONTINUE, "confidence": FALLBACK_CONFIDENCE}
 
 
 def get_decision_model() -> DecisionModel:

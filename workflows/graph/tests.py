@@ -6,7 +6,9 @@ from django.test import SimpleTestCase, TestCase
 from apps.catalog.models import Category, Product
 
 from .extraction import extract_budget, extract_needs
+from .orchestrator import run_side_query
 from .product_purchase import run_product_purchase
+from .shipping_query import run_shipping_query
 from .state import FunnelStage, build_initial_state
 
 
@@ -94,3 +96,49 @@ class ProductPurchaseGraphTests(TestCase):
 
         self.assertEqual(new_state["candidate_products"], [])
         self.assertIn("No encontré", reply)
+
+
+class ShippingQueryGraphTests(SimpleTestCase):
+    def test_quotes_a_serviceable_destination(self):
+        reply = run_shipping_query("¿Hacen envíos a Santa Fe?")
+
+        self.assertIn("Santa Fe", reply)
+        self.assertIn("$12000", reply)
+
+    def test_reports_unserviceable_destination(self):
+        reply = run_shipping_query("¿Hacen envíos a la Antártida?")
+
+        self.assertIn("¿A qué localidad", reply)
+
+    def test_asks_for_destination_when_none_mentioned(self):
+        reply = run_shipping_query("¿Hacen envíos?")
+
+        self.assertIn("¿A qué localidad", reply)
+
+
+class RunSideQueryTests(SimpleTestCase):
+    def test_suspends_and_resumes_active_workflow(self):
+        state = build_initial_state(conversation_id=1)
+        state["active_workflow"] = "PRODUCT_PURCHASE"
+        state["active_node"] = "PRODUCT_COMPARISON"
+
+        new_state, reply = run_side_query(state, "¿Hacen envíos a Santa Fe?")
+
+        self.assertIn("Santa Fe", reply)
+        # Fully resumed: no trace of the interruption left in the final state.
+        self.assertEqual(new_state["active_workflow"], "PRODUCT_PURCHASE")
+        self.assertEqual(new_state["active_node"], "PRODUCT_COMPARISON")
+        self.assertIsNone(new_state["suspended_workflow"])
+        self.assertIsNone(new_state["suspended_node"])
+        self.assertIsNone(new_state["interruption"])
+        self.assertEqual(new_state["workflow_stack"], [])
+        self.assertEqual(new_state["routing_decision"], "RESUME")
+
+    def test_side_query_without_an_active_workflow_leaves_nothing_active(self):
+        state = build_initial_state(conversation_id=1)
+
+        new_state, _reply = run_side_query(state, "¿Hacen envíos a Santa Fe?")
+
+        self.assertIsNone(new_state["active_workflow"])
+        self.assertIsNone(new_state["active_node"])
+        self.assertEqual(new_state["workflow_stack"], [])

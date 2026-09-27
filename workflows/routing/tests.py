@@ -12,14 +12,14 @@ from .router import route_message
 
 
 class AlwaysContinueDecisionModelTests(SimpleTestCase):
-    def test_always_returns_continue_with_full_confidence(self):
+    def test_always_returns_continue_at_medium_confidence(self):
         model = AlwaysContinueDecisionModel()
         state = build_initial_state(conversation_id=1)
 
         result = model.decide("¿Hacen envíos a Santa Fe?", state)
 
         self.assertEqual(result["decision"], "CONTINUE")
-        self.assertEqual(result["confidence"], 1.0)
+        self.assertEqual(result["confidence"], 0.7)
 
 
 class RouteMessageTests(SimpleTestCase):
@@ -28,8 +28,18 @@ class RouteMessageTests(SimpleTestCase):
 
         state = route_message(state, "Busco una notebook gamer.")
 
+        # No Jev configured -> medium-confidence CONTINUE, no shipping
+        # keyword to override it via the heuristic.
         self.assertEqual(state["routing_decision"], "CONTINUE")
-        self.assertEqual(state["routing_confidence"], 1.0)
+        self.assertEqual(state["routing_confidence"], 0.7)
+
+    def test_shipping_keyword_overrides_fallback_to_side_query(self):
+        state = build_initial_state(conversation_id=1)
+
+        state = route_message(state, "¿Hacen envíos a Santa Fe?")
+
+        self.assertEqual(state["routing_decision"], "SIDE_QUERY")
+        self.assertEqual(state["routing_confidence"], 0.7)
 
 
 class _FakeTypeSafeClient:
@@ -78,7 +88,7 @@ class JevDecisionModelTests(SimpleTestCase):
 
         result = model.decide("¿Hacen envíos a Santa Fe?", state)
 
-        self.assertEqual(result, {"decision": "CONTINUE", "confidence": 1.0})
+        self.assertEqual(result, {"decision": "CONTINUE", "confidence": 0.7})
 
 
 class GetJevDecisionModelTests(SimpleTestCase):
