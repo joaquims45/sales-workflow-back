@@ -24,4 +24,5 @@ urlpatterns = [
     path('healthz/', healthcheck, name='healthcheck'),
     path('api/catalog/', include('apps.catalog.urls')),
     path('api/conversations/', include('apps.conversations.urls')),
+    path('mock-checkout/', include('apps.payments.urls')),
 ]
