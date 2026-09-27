@@ -1,3 +1,6 @@
+import tempfile
+from pathlib import Path
+
 from django.test import SimpleTestCase, TestCase
 
 from apps.catalog.models import Category, Product
@@ -34,6 +37,15 @@ class ExtractionTests(SimpleTestCase):
 
 class ProductPurchaseGraphTests(TestCase):
     def setUp(self):
+        # No FAISS index at this path -> search_products falls back to the
+        # naive keyword-overlap filter, keeping these assertions independent
+        # of whatever index happens to exist on the developer's machine.
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        override = self.settings(FAISS_INDEX_PATH=str(Path(tmp_dir.name) / "unused.bin"))
+        override.enable()
+        self.addCleanup(override.disable)
+
         category = Category.objects.create(name="Notebooks", slug="notebooks")
         self.gaming_laptop = Product.objects.create(
             category=category,

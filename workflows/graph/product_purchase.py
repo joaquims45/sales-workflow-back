@@ -69,7 +69,8 @@ def product_search_node(state: ProductPurchaseGraphState) -> dict:
         budget_max=state["constraints"].get("budget_max"),
         needs=state["customer_needs"],
     )
-    candidates = search_products(constraints)
+    query = " ".join(state["customer_needs"] + [state["incoming_message"]]).strip()
+    candidates = search_products(query, constraints)
     return {"candidate_products": [candidate.id for candidate in candidates], "active_node": "PRODUCT_SEARCH"}
 
 
