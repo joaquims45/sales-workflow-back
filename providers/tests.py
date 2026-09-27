@@ -177,7 +177,10 @@ class OpenAIDiscoveryExtractionProviderTests(SimpleTestCase):
 
         result = provider.extract("Busco algo para jugar, tengo 1.500.000.", state)
 
-        self.assertEqual(result, {"needs": ["gaming"], "budget_max": 1500000, "budget_unknown": False})
+        self.assertEqual(
+            result,
+            {"needs": ["gaming"], "budget_max": 1500000, "budget_unknown": False, "wants_to_buy": False},
+        )
 
     def test_parses_explicit_budget_unknown(self):
         client = _FakeChatClient('{"needs": ["gaming"], "budget_max": null, "budget_unknown": true}')
@@ -186,7 +189,28 @@ class OpenAIDiscoveryExtractionProviderTests(SimpleTestCase):
 
         result = provider.extract("No sé, busco alguna placa de video.", state)
 
-        self.assertEqual(result, {"needs": ["gaming"], "budget_max": None, "budget_unknown": True})
+        self.assertEqual(
+            result,
+            {"needs": ["gaming"], "budget_max": None, "budget_unknown": True, "wants_to_buy": False},
+        )
+
+    def test_parses_wants_to_buy(self):
+        client = _FakeChatClient('{"needs": [], "budget_max": null, "budget_unknown": false, "wants_to_buy": true}')
+        provider = OpenAIDiscoveryExtractionProvider(client=client)
+        state = build_initial_state(conversation_id=1)
+
+        result = provider.extract("Me interesa la lenovo.", state)
+
+        self.assertTrue(result["wants_to_buy"])
+
+    def test_defaults_wants_to_buy_to_false_when_missing(self):
+        client = _FakeChatClient('{"needs": [], "budget_max": null, "budget_unknown": false}')
+        provider = OpenAIDiscoveryExtractionProvider(client=client)
+        state = build_initial_state(conversation_id=1)
+
+        result = provider.extract("mensaje", state)
+
+        self.assertFalse(result["wants_to_buy"])
 
     def test_returns_none_for_malformed_json(self):
         client = _FakeChatClient("not json")

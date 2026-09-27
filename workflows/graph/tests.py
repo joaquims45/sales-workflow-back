@@ -113,6 +113,7 @@ class ProductPurchaseGraphTests(TestCase):
             "needs": ["gaming"],
             "budget_max": None,
             "budget_unknown": True,
+            "wants_to_buy": False,
         }
 
         with mock.patch(
@@ -140,6 +141,34 @@ class ProductPurchaseGraphTests(TestCase):
         self.assertEqual(order.total, Decimal("1400000.00"))
         self.assertEqual(order.conversation_id, conversation.id)
         self.assertEqual(Payment.objects.get().status, Payment.Status.PENDING)
+
+    def test_purchase_intent_without_keywords_uses_extraction_provider(self):
+        # Regression: "Me interesa la lenovo" / "Si, la lenovo" don't match
+        # PURCHASE_INTENT_KEYWORDS (comprar/la compro/...), so without the
+        # extraction provider's wants_to_buy this fell through to
+        # product_search, re-running the search and drifting the candidate
+        # list turn after turn instead of ever reaching checkout.
+        conversation = Conversation.objects.create()
+        state = build_initial_state(conversation_id=conversation.id)
+        state["candidate_products"] = [self.gaming_laptop.id]
+
+        fake_provider = mock.Mock()
+        fake_provider.extract.return_value = {
+            "needs": [],
+            "budget_max": None,
+            "budget_unknown": False,
+            "wants_to_buy": True,
+        }
+
+        with mock.patch(
+            "workflows.graph.product_purchase.get_discovery_extraction_provider",
+            return_value=fake_provider,
+        ):
+            new_state, reply = run_product_purchase(state, "Me interesa la ASUS.")
+
+        self.assertEqual(new_state["selected_product_id"], self.gaming_laptop.id)
+        self.assertTrue(new_state["checkout_ready"])
+        self.assertIn("Listo", reply)
 
     def test_matches_candidate_by_name_among_several(self):
         conversation = Conversation.objects.create()
@@ -338,7 +367,6 @@ class RunSideQueryTests(TestCase):
 
 class RunReplaceTests(TestCase):
     def setUp(self):
-       |
         tmp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(tmp_dir.cleanup)
         override = self.settings(FAISS_INDEX_PATH=str(Path(tmp_dir.name) / "unused.bin"))

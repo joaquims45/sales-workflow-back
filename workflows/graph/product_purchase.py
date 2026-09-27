@@ -33,10 +33,11 @@ class ProductPurchaseGraphState(SalesState):
     incoming_message: str
     reply: str
     budget_unknown: bool
+    wants_to_buy: bool
 
 
 def discovery_node(state: ProductPurchaseGraphState) -> dict:
-    updates: dict = {"active_node": "DISCOVERY", "budget_unknown": False}
+    updates: dict = {"active_node": "DISCOVERY", "budget_unknown": False, "wants_to_buy": False}
 
     if state["primary_goal"] is None:
         updates["primary_goal"] = PrimaryGoal.BUY_PRODUCT
@@ -58,6 +59,7 @@ def discovery_node(state: ProductPurchaseGraphState) -> dict:
         if extraction["budget_max"] is not None:
             constraints["budget_max"] = extraction["budget_max"]
         updates["budget_unknown"] = extraction["budget_unknown"]
+        updates["wants_to_buy"] = extraction.get("wants_to_buy", False)
     else:
         for need in extract_needs(text):
             if need not in needs:
@@ -65,6 +67,7 @@ def discovery_node(state: ProductPurchaseGraphState) -> dict:
         budget = extract_budget(text)
         if budget is not None:
             constraints["budget_max"] = budget
+        updates["wants_to_buy"] = extract_purchase_intent(text)
 
     updates["customer_needs"] = needs
     updates["constraints"] = constraints
@@ -76,7 +79,7 @@ def discovery_node(state: ProductPurchaseGraphState) -> dict:
 
 
 def route_after_discovery(state: ProductPurchaseGraphState) -> str:
-    wants_to_buy = extract_purchase_intent(state["incoming_message"])
+    wants_to_buy = state.get("wants_to_buy", False)
     has_a_product_in_mind = bool(state["candidate_products"]) or state["selected_product_id"] is not None
 
     if wants_to_buy and has_a_product_in_mind:

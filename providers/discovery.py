@@ -29,6 +29,7 @@ class DiscoveryExtraction(TypedDict):
     needs: list[str]
     budget_max: int | None
     budget_unknown: bool
+    wants_to_buy: bool
 
 
 class DiscoveryExtractionProvider(Protocol):
@@ -51,11 +52,15 @@ own category.
 Respond with only a JSON object:
 {{"needs": [<short lowercase tags for what they want/need, e.g. "gaming", "programming", "office">], \
 "budget_max": <integer budget in local currency mentioned in THIS message, or null if none>, \
-"budget_unknown": <true only if they explicitly said they don't know or have no budget in mind>}}
+"budget_unknown": <true only if they explicitly said they don't know or have no budget in mind>, \
+"wants_to_buy": <true if this message expresses they want to go ahead with one of the candidate \
+products below — e.g. "me interesa la lenovo", "si, esa", "dale, la llevo" — false otherwise. Only \
+true when candidate products were already offered.>}}
 
 primary_goal so far: {primary_goal}
 needs already known: {existing_needs}
 budget already known: {existing_budget}
+candidate products already offered: {candidate_products}
 new message: {message!r}"""
 
 
@@ -73,10 +78,16 @@ class OpenAIDiscoveryExtractionProvider:
             self._client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
     def extract(self, message_text: str, state: "SalesState") -> DiscoveryExtraction | None:
+        from apps.catalog.models import Product
+
+        candidate_ids = state.get("candidate_products") or []
+        candidate_names = list(Product.objects.filter(id__in=candidate_ids).values_list("name", flat=True))
+
         prompt = _PROMPT_TEMPLATE.format(
             primary_goal=state.get("primary_goal"),
             existing_needs=state.get("customer_needs") or [],
             existing_budget=(state.get("constraints") or {}).get("budget_max"),
+            candidate_products=candidate_names,
             message=message_text,
         )
 
@@ -102,6 +113,7 @@ class OpenAIDiscoveryExtractionProvider:
             "needs": needs,
             "budget_max": budget_max,
             "budget_unknown": bool(data.get("budget_unknown", False)),
+            "wants_to_buy": bool(data.get("wants_to_buy", False)),
         }
 
 
