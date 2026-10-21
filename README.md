@@ -1,4 +1,4 @@
-# Sales Workflow — Backend (`sales-workflow-api`)
+# Sales Workflow — Backend (`sales-workflow-back`)
 
 Django/DRF backend for **Sales Workflow**: an agentic sales workflow engine
 that understands when to continue, interrupt, branch, resume or replace an
