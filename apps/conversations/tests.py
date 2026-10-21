@@ -285,6 +285,30 @@ class ConversationScenarioTests(APITestCase):
         self.assertEqual(event_types.count("jev.decision"), 1)
         self.assertEqual(event_types.count("routing.completed"), 1)
 
+    def test_workflow_suspended_reports_the_original_node_across_both_turns(self):
+        # Regression: on the follow-up turn (still mid SHIPPING_QUERY,
+        # waiting for a destination), workflow.suspended used to report
+        # active_node ("EXTRACT_DESTINATION" — the side query's own node)
+        # instead of the PRODUCT_PURCHASE node actually being interrupted.
+        conversation = Conversation.objects.create()
+
+        self._post_message(conversation, "Busco una notebook gamer.")
+        self._post_message(conversation, "Tengo hasta $1.500.000.")
+
+        first = self._post_message(conversation, "¿Hacen envíos?")
+        self.assertEqual(first.data["sales_state"]["interruption"], "SHIPPING_QUERY")
+
+        self._post_message(conversation, "Santa Fe")
+
+        suspended_nodes = [
+            payload["node"]
+            for event_type, payload in conversation.events.order_by("created_at").values_list(
+                "event_type", "payload"
+            )
+            if event_type == "workflow.suspended"
+        ]
+        self.assertEqual(suspended_nodes, ["RECOMMENDATION", "RECOMMENDATION"])
+
     def test_chitchat_after_checkout_does_not_duplicate_order(self):
         # Regression: "Genial muchas gracias" after a completed purchase
         # used to re-enter discovery_node (every CONTINUE message does) and

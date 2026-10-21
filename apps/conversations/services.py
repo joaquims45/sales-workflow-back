@@ -21,10 +21,18 @@ def get_or_create_state(conversation: Conversation) -> SalesState:
 
 
 def _run_side_query_turn(conversation: Conversation, state: SalesState, message_text: str) -> tuple[SalesState, str]:
+    # On the turn that first suspends, active_node is still the real
+    # PRODUCT_PURCHASE node being interrupted. On a follow-up turn (still
+    # mid SHIPPING_QUERY, e.g. waiting for a destination), active_node has
+    # already moved to the side query's own node (EXTRACT_DESTINATION) —
+    # suspended_node is what still holds the original node in that case.
+    already_pending = state["interruption"] == "SHIPPING_QUERY"
+    suspended_from_node = state["suspended_node"] if already_pending else state["active_node"]
+
     emit_event(
         conversation,
         "workflow.suspended",
-        {"workflow": state["active_workflow"], "node": state["active_node"]},
+        {"workflow": state["active_workflow"], "node": suspended_from_node},
     )
 
     new_state, reply = run_side_query(state, message_text)
